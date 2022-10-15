@@ -255,17 +255,17 @@ fn write_lua_file(c2d_file: &str, d2c_file: &str, file_struct: FileStruct) -> st
     let mut c2d_list: Vec<&Message> = file_struct
         .message_array
         .iter()
-        .filter(|x1| x1.message_type == MessageType::Req)
-        .map(|x2| x2)
-        .collect();
+        .filter(|x1| x1.message_type == MessageType::Req).map(|x2| x2).collect();
 
-    let d2c_list: Vec<&Message> = file_struct
-        .message_array
-        .iter()
-        .filter(|x1| x1.message_type == MessageType::Rsp || x1.message_type == MessageType::Notify)
-        .map(|x2| x2)
-        .collect();
+    let mut d2c_list: Vec<&Message> = file_struct.message_array.iter().filter(|x1| x1.message_type == MessageType::Rsp || x1.message_type == MessageType::Notify).map(|x2| x2).collect();
 
+    create_or_update_file(&mut c2d_list, c2d_file)?;
+    create_or_update_file(&mut d2c_list, d2c_file)?;
+
+    Ok(())
+}
+
+fn create_or_update_file(insert_msg_list: &mut Vec<&Message>, c2d_file: &str) -> std::io::Result<()> {
     //c2d file gen
     if let Ok(mut file) = File::open(c2d_file) {
         println!("----open file {}----", c2d_file);
@@ -276,13 +276,9 @@ fn write_lua_file(c2d_file: &str, d2c_file: &str, file_struct: FileStruct) -> st
 
         // 1.构造正则
         let mut re_vec: Vec<Regex> = vec![];
-        for message in &c2d_list {
+        for message in insert_msg_list.iter() {
             // params
-            let s: Vec<String> = message
-                .field_array
-                .iter()
-                .map(|x| x.field_name.to_string())
-                .collect();
+            let s: Vec<String> = message.field_array.iter().map(|x| x.field_name.to_string()).collect();
             let params = s.join(", ");
 
             let res = format!(
@@ -311,7 +307,7 @@ fn write_lua_file(c2d_file: &str, d2c_file: &str, file_struct: FileStruct) -> st
                     println!("exist func in {}", line);
                     re_vec.remove(i);
                     // 一次只可能匹配到一个，直接break
-                    c2d_list.remove(i);
+                    insert_msg_list.remove(i);
 
                     break;
                 }
@@ -323,14 +319,14 @@ fn write_lua_file(c2d_file: &str, d2c_file: &str, file_struct: FileStruct) -> st
             }
         }
 
-        if c2d_list.len() > 0 {
+        if insert_msg_list.len() > 0 {
             // 还剩下需要append的，加到后面
             let mut file = OpenOptions::new().write(true).open(c2d_file)?;
             // 找到seek位置
-            file.seek_write(b"-----autogen update-----\n\n", append_pos)?;
+            file.seek_write(b"-----autogen update below-----\n\n", append_pos)?;
 
             // functions
-            insert_function_code(&c2d_list, &mut file, table_name)?;
+            insert_function_code(&insert_msg_list, &mut file, table_name)?;
 
             // return
             write!(file, "{}", format!("return {}\n", table_name))?;
@@ -346,14 +342,12 @@ fn write_lua_file(c2d_file: &str, d2c_file: &str, file_struct: FileStruct) -> st
             write!(file, "{}", format!("local {} = {{\t}}\n\n", table_name))?;
 
             // functions
-            insert_function_code(&c2d_list, &mut file, table_name)?;
+            insert_function_code(&insert_msg_list, &mut file, table_name)?;
 
             // return
             write!(file, "{}", format!("return {}\n", table_name))?;
         }
     }
-
-    println!("----");
 
     Ok(())
 }

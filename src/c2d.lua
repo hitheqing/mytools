@@ -1,10 +1,7 @@
 --auto generated--
 local c2d = {	}
 
----pso_enter_req c2d 请求入场/再来一次
-function c2d.pso_enter_req()
-	print(bWriteLog and string.format("c2d.pso_enter_req "))
-end
+
 
 ---pso_ready_req c2d 通知ds ready
 function c2d.pso_ready_req()
@@ -37,6 +34,13 @@ end
 ---@param score int32 本次分数
 function c2d.pso_overlap_result_req(score)
 	print(bWriteLog and string.format("c2d.pso_overlap_result_req score:%s", score))
+end
+
+-----autogen update below-----
+
+---pso_enter_req c2d 请求入场/再来一次
+function c2d.pso_enter_req()
+	print(bWriteLog and string.format("c2d.pso_enter_req "))
 end
 
 return c2d
