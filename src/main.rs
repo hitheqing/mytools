@@ -1,12 +1,11 @@
-use lazy_static::*;
-use regex::{Captures, Match, Regex};
-use std::borrow::{Borrow, BorrowMut};
-use std::cell::RefCell;
+use regex::{ Regex};
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::path::Path;
+use std::fs::OpenOptions;
+use std::os::windows::fs::FileExt;
 
 fn main() {
     println!("Hello, world!");
@@ -121,7 +120,7 @@ fn parse_file(filepath: &str) -> std::io::Result<FileStruct> {
 
     let mut comment = "".to_string();
     loop {
-        let mut line = &mut String::new();
+        let line = &mut String::new();
         let read_len = buf_reader.read_line(line);
         if read_len.unwrap() == 0 {
             break;
@@ -199,7 +198,7 @@ fn parse_file(filepath: &str) -> std::io::Result<FileStruct> {
                 // parse field
                 if re_field.is_match(line.as_str()) {
                     // 找到刚刚添加的元素
-                    let mut message = file_struct.message_array.last_mut().unwrap();
+                    let message = file_struct.message_array.last_mut().unwrap();
                     message.field_array.push(Field::new());
 
                     // 找到刚刚添加的元素
@@ -252,7 +251,7 @@ fn parse_file(filepath: &str) -> std::io::Result<FileStruct> {
 
 fn write_lua_file(c2d_file: &str, d2c_file: &str, file_struct: FileStruct) -> std::io::Result<()> {
     // 4.将结果写入文件
-    let c2d_list: Vec<&Message> = file_struct
+    let mut c2d_list: Vec<&Message> = file_struct
         .message_array
         .iter()
         .filter(|x1| x1.message_type == MessageType::Req)
@@ -269,16 +268,70 @@ fn write_lua_file(c2d_file: &str, d2c_file: &str, file_struct: FileStruct) -> st
     //c2d file gen
     if let Ok(mut file) = File::open(c2d_file) {
         println!("----open file {}----", c2d_file);
-        // let mut buf_reader = BufReader::new(file);
-        let all_text:&mut String =&mut String::new();
-        file.read_to_string(all_text)?;
 
+        // 读文件，如果未找到函数，或者函数签名不一致，则新增函数
+        let mut buf_reader = BufReader::new(file);
+        let table_name = Path::new(c2d_file).file_stem().unwrap().to_str().unwrap();
 
-        for message in c2d_list {
-            // let re_fun = Regex::new( format!("^[ \t]*function[ \t]*{}\\.([a-zA-Z_]\\w*)",message) "").unwrap();
+        // 1.构造正则
+        let mut re_vec: Vec<Regex> = vec![];
+        for message in &c2d_list {
+            // params
+            let s: Vec<String> = message
+                .field_array
+                .iter()
+                .map(|x| x.field_name.to_string())
+                .collect();
+            let params = s.join(", ");
 
+            let res = format!(
+                "^[ \t]*function {}.{}\\({}\\)",
+                table_name, message.message_name_full, params
+            );
+            let re_fun = Regex::new(res.as_str()).unwrap();
+            re_vec.push(re_fun);
         }
 
+        let mut last_pos = 1;
+        let mut pos = 1;
+        let mut append_pos = 1;
+        loop {
+            let line= &mut String::new();
+            let read_len = buf_reader.read_line(line);
+            last_pos = pos;
+            pos = buf_reader.stream_position()?;
+            if read_len.unwrap() == 0 {
+                break;
+            }
+
+            for i in (0..re_vec.len()).rev() {
+                if re_vec[i].is_match(line) {
+                    // re_vec[i].captures()
+                    println!("exist func in {}", line);
+                    re_vec.remove(i);
+                    // 一次只可能匹配到一个，直接break
+                    c2d_list.remove(i);
+
+                    break;
+                }
+            }
+
+            // 找到return开始的地方，插入代码的地方
+            if  line.starts_with(format!("return {}",table_name).as_str()){
+                append_pos = last_pos;
+            }
+        }
+
+        // 还剩下需要append的，加到后面
+        let mut file = OpenOptions::new() .write(true) .open(c2d_file)?;
+        // 找到seek位置
+        file.seek_write(b"-----autogen update-----\n\n", append_pos)?;
+
+        // functions
+        insert_function_code(&c2d_list,&mut file,table_name)?;
+
+        // return
+        write!(file, "{}", format!("\nreturn {}\n", table_name))?;
     } else {
         if let Ok(mut file) = File::create(c2d_file) {
             println!("----create file {}----", c2d_file);
@@ -290,76 +343,84 @@ fn write_lua_file(c2d_file: &str, d2c_file: &str, file_struct: FileStruct) -> st
             write!(file, "{}", format!("local {} = {{\t}}\n\n", table_name))?;
 
             // functions
-            for message in c2d_list {
-                // comment
-                write!(
-                    file,
-                    "{}",
-                    format!("---{} {}\n", message.message_name_full, message.comment)
-                )?;
-                let s: Vec<String> = message
-                    .field_array
-                    .iter()
-                    .map(|x| {
-                        format!(
-                            "---@param {} {} {}\n",
-                            x.field_name, x.field_type, x.comment
-                        )
-                    })
-                    .collect();
-                let param_comment = s.join("");
-                write!(file, "{}", param_comment)?;
+            insert_function_code(&c2d_list,&mut file,table_name)?;
 
-                // params
-                let s: Vec<String> = message
-                    .field_array
-                    .iter()
-                    .map(|x| x.field_name.to_string())
-                    .collect();
-                let params = s.join(", ");
-
-                // function
-                write!(
-                    file,
-                    "{}",
-                    format!(
-                        "function {}.{}({})\n",
-                        table_name, message.message_name_full, params
-                    )
-                )?;
-
-                // print
-                if s.len() > 0 {
-                    let params_1 = s.join(":%s, ");
-                    let params_2 = s.join(", ");
-                    write!(
-                        file,
-                        "{}",
-                        format!(
-                            "\tprint(bWriteLog and string.format(\"{}.{} {}\",{}))\n",
-                            table_name, message.message_name_full, params_1, params_2
-                        )
-                    )?;
-                } else {
-                    write!(
-                        file,
-                        "{}",
-                        format!(
-                            "\tprint(bWriteLog and string.format(\"{}.{} \"))\n",
-                            table_name, message.message_name_full
-                        )
-                    )?;
-                }
-
-                // end
-                write!(file, "{}", format!("end\n\n\n"))?;
-            }
-
+            // return
             write!(file, "{}", format!("\nreturn {}\n", table_name))?;
         }
     }
 
     println!("----");
+
+    Ok(())
+}
+
+fn insert_function_code(c2d_list:&Vec<&Message>,  file: &mut File, table_name:&str) -> std::io::Result<()>{
+    // functions
+    for message in c2d_list {
+        // comment
+        write!(
+            file,
+            "{}",
+            format!("---{} {}\n", message.message_name_full, message.comment)
+        )?;
+        let s: Vec<String> = message
+            .field_array
+            .iter()
+            .map(|x| {
+                format!(
+                    "---@param {} {} {}\n",
+                    x.field_name, x.field_type, x.comment
+                )
+            })
+            .collect();
+        let param_comment = s.join("");
+        write!(file, "{}", param_comment)?;
+
+        // params
+        let s: Vec<String> = message
+            .field_array
+            .iter()
+            .map(|x| x.field_name.to_string())
+            .collect();
+        let params = s.join(", ");
+
+        // function
+        write!(
+            file,
+            "{}",
+            format!(
+                "function {}.{}({})\n",
+                table_name, message.message_name_full, params
+            )
+        )?;
+
+        // print
+        if s.len() > 0 {
+            let params_1 = s.join(":%s, ");
+            let params_2 = s.join(", ");
+            write!(
+                file,
+                "{}",
+                format!(
+                    "\tprint(bWriteLog and string.format(\"{}.{} {}\",{}))\n",
+                    table_name, message.message_name_full, params_1, params_2
+                )
+            )?;
+        } else {
+            write!(
+                file,
+                "{}",
+                format!(
+                    "\tprint(bWriteLog and string.format(\"{}.{} \"))\n",
+                    table_name, message.message_name_full
+                )
+            )?;
+        }
+
+        // end
+        write!(file, "{}", format!("end\n\n\n"))?;
+    }
 
     Ok(())
 }
