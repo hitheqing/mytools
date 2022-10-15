@@ -1,6 +1,7 @@
 use lazy_static::*;
 use regex::{Captures, Match, Regex};
 use std::borrow::{Borrow, BorrowMut};
+use std::cell::RefCell;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
@@ -10,7 +11,9 @@ fn main() {
 
     // 第一个程序：读文件、正则匹配、文件结构parse、写文件
     let path = r"E:\trunk\Survive\Source\Lua\proto\ds_client\SocialIsland\Pso.proto";
-    parse_file(path).unwrap();
+    unsafe {
+        parse_file(path).unwrap();
+    }
 }
 
 enum State {
@@ -19,7 +22,7 @@ enum State {
     MessageScopeBegin,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
 enum MessageType {
     Req,
     Rsp,
@@ -32,6 +35,31 @@ struct FileStruct {
 }
 
 impl FileStruct {
+    pub(crate) fn make_pair(&mut self, x: String, y: String) {
+        let sx = self
+            .message_array
+            .binary_search_by(|x1| x1.message_name_full.cmp(&x));
+        let sy = self
+            .message_array
+            .binary_search_by(|x1| x1.message_name_full.cmp(&y));
+
+        if let Ok(value1) = sx {
+            if let Ok(value2) = sy {
+                self.message_array[value1].res_message = Some(&(self.message_array[value2]))
+            }
+        }
+    }
+}
+
+// impl FileStruct {
+//     pub(crate) fn make_pair(&mut self, x: &Message, y: &Message) {
+//         let sx = self.message_array.binary_search(x);
+//         let sy = self.message_array.binary_search(x);
+//
+//     }
+// }
+
+impl FileStruct {
     pub fn new() -> FileStruct {
         FileStruct {
             message_array: vec![],
@@ -39,13 +67,14 @@ impl FileStruct {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
 struct Message {
     message_type: MessageType,
     message_name_full: String,
     message_name_no_suffix: String,
     field_array: Vec<Field>,
     comment: String,
+    res_message: Option<*const Message>,
 }
 
 impl Message {
@@ -55,12 +84,13 @@ impl Message {
             message_name_full: "".to_string(),
             message_name_no_suffix: "".to_string(),
             field_array: vec![],
-            comment: "".to_string()
+            comment: "".to_string(),
+            res_message: None,
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
 struct Field {
     is_array: bool,
     field_type: String,
@@ -79,7 +109,7 @@ impl Field {
     }
 }
 
-fn parse_file(filepath: &str) -> std::io::Result<()> {
+unsafe fn parse_file(filepath: &str) -> std::io::Result<()> {
     // 可以使用lazy_static 来提高性能,但是这样会 无法代码提示.可以在程序稳定后进行替换
     //    lazy_static! {
     //        static ref RE: Regex = Regex::new("...").unwrap();
@@ -89,7 +119,7 @@ fn parse_file(filepath: &str) -> std::io::Result<()> {
 
     // 1 name
     // 2 {
-    let re_message_define = Regex::new("message *([a-zA-Z_]\\w*) *(\\{)?").unwrap();
+    let re_message_define = Regex::new("^[ 	]*message *([a-zA-Z_]\\w*) *(\\{)?").unwrap();
     let re_left_brace = Regex::new(" *(\\{)").unwrap();
     let re_right_brace = Regex::new(" *(})").unwrap();
     let re_comment = Regex::new("^[ 	]*//][ 	]*(.*)$").unwrap();
@@ -108,9 +138,9 @@ fn parse_file(filepath: &str) -> std::io::Result<()> {
     let file = File::open(filepath)?;
     let mut buf_reader = BufReader::new(file);
 
-    let mut comment ="".to_string();
+    let mut comment = "".to_string();
     loop {
-        let mut line =  &  mut String::new();
+        let mut line = &mut String::new();
         let read_len = buf_reader.read_line(line);
         if read_len.unwrap() == 0 {
             break;
@@ -140,13 +170,25 @@ fn parse_file(filepath: &str) -> std::io::Result<()> {
 
                         if message_name.as_str().ends_with("_req") {
                             message.message_type = MessageType::Req;
-                            message.message_name_no_suffix = message_name.as_str().strip_suffix("_req").unwrap().to_string();
+                            message.message_name_no_suffix = message_name
+                                .as_str()
+                                .strip_suffix("_req")
+                                .unwrap()
+                                .to_string();
                         } else if message_name.as_str().ends_with("_rsp") {
                             message.message_type = MessageType::Rsp;
-                            message.message_name_no_suffix = message_name.as_str().strip_suffix("_rsp").unwrap().to_string();
+                            message.message_name_no_suffix = message_name
+                                .as_str()
+                                .strip_suffix("_rsp")
+                                .unwrap()
+                                .to_string();
                         } else if message_name.as_str().ends_with("_notify") {
                             message.message_type = MessageType::Notify;
-                            message.message_name_no_suffix = message_name.as_str().strip_suffix("_notify").unwrap().to_string();
+                            message.message_name_no_suffix = message_name
+                                .as_str()
+                                .strip_suffix("_notify")
+                                .unwrap()
+                                .to_string();
                         }
                     }
 
@@ -165,8 +207,8 @@ fn parse_file(filepath: &str) -> std::io::Result<()> {
                 // parse scope end
                 if re_right_brace.is_match(line.as_str()) {
                     state = State::Normal;
-                    let mut message = file_struct.message_array.last().unwrap();
-                    eprintln!("message = {:#?}", message);
+                    // let mut message = file_struct.message_array.last().unwrap();
+                    // eprintln!("message = {:#?}", message);
                     continue;
                 }
 
@@ -200,5 +242,24 @@ fn parse_file(filepath: &str) -> std::io::Result<()> {
         }
     }
 
+    // 3.遍历file_struct.message_array， 对每个req的message， 寻找对应的rsp message。需要双重循环同一个vector
+    for i in 0..file_struct.message_array.len() {
+        // let mut req_message = &mut file_struct.message_array[i];
+        if file_struct.message_array[i].message_type == MessageType::Req {
+            for j in 0..file_struct.message_array.len() {
+                // let rsp_message = &file_struct.message_array[j];
+                if file_struct.message_array[j].message_type == MessageType::Rsp
+                && file_struct.message_array[i].message_name_no_suffix.as_str() == file_struct.message_array[j].message_name_no_suffix.as_str()
+                {
+                    file_struct.message_array[i].res_message = Some(&file_struct.message_array[j]);
+                }
+            }
+        }
+    }
+
+    // 4.将结果写入文件
+
+
+    eprintln!("file_struct = {:#?}", file_struct);
     Ok(())
 }
