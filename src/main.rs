@@ -1,11 +1,12 @@
-use regex::{ Regex};
 use std::fmt::Debug;
 use std::fs::File;
-use std::io::prelude::*;
-use std::io::BufReader;
-use std::path::Path;
 use std::fs::OpenOptions;
+use std::io::BufReader;
+use std::io::prelude::*;
 use std::os::windows::fs::FileExt;
+use std::path::Path;
+
+use regex::Regex;
 
 fn main() {
     println!("Hello, world!");
@@ -296,7 +297,7 @@ fn write_lua_file(c2d_file: &str, d2c_file: &str, file_struct: FileStruct) -> st
         let mut pos = 1;
         let mut append_pos = 1;
         loop {
-            let line= &mut String::new();
+            let line = &mut String::new();
             let read_len = buf_reader.read_line(line);
             last_pos = pos;
             pos = buf_reader.stream_position()?;
@@ -317,21 +318,23 @@ fn write_lua_file(c2d_file: &str, d2c_file: &str, file_struct: FileStruct) -> st
             }
 
             // 找到return开始的地方，插入代码的地方
-            if  line.starts_with(format!("return {}",table_name).as_str()){
+            if line.starts_with(format!("return {}", table_name).as_str()) {
                 append_pos = last_pos;
             }
         }
 
-        // 还剩下需要append的，加到后面
-        let mut file = OpenOptions::new() .write(true) .open(c2d_file)?;
-        // 找到seek位置
-        file.seek_write(b"-----autogen update-----\n\n", append_pos)?;
+        if c2d_list.len() > 0 {
+            // 还剩下需要append的，加到后面
+            let mut file = OpenOptions::new().write(true).open(c2d_file)?;
+            // 找到seek位置
+            file.seek_write(b"-----autogen update-----\n\n", append_pos)?;
 
-        // functions
-        insert_function_code(&c2d_list,&mut file,table_name)?;
+            // functions
+            insert_function_code(&c2d_list, &mut file, table_name)?;
 
-        // return
-        write!(file, "{}", format!("\nreturn {}\n", table_name))?;
+            // return
+            write!(file, "{}", format!("return {}\n", table_name))?;
+        }
     } else {
         if let Ok(mut file) = File::create(c2d_file) {
             println!("----create file {}----", c2d_file);
@@ -343,10 +346,10 @@ fn write_lua_file(c2d_file: &str, d2c_file: &str, file_struct: FileStruct) -> st
             write!(file, "{}", format!("local {} = {{\t}}\n\n", table_name))?;
 
             // functions
-            insert_function_code(&c2d_list,&mut file,table_name)?;
+            insert_function_code(&c2d_list, &mut file, table_name)?;
 
             // return
-            write!(file, "{}", format!("\nreturn {}\n", table_name))?;
+            write!(file, "{}", format!("return {}\n", table_name))?;
         }
     }
 
@@ -355,7 +358,11 @@ fn write_lua_file(c2d_file: &str, d2c_file: &str, file_struct: FileStruct) -> st
     Ok(())
 }
 
-fn insert_function_code(c2d_list:&Vec<&Message>,  file: &mut File, table_name:&str) -> std::io::Result<()>{
+fn insert_function_code(
+    c2d_list: &Vec<&Message>,
+    file: &mut File,
+    table_name: &str,
+) -> std::io::Result<()> {
     // functions
     for message in c2d_list {
         // comment
@@ -364,8 +371,7 @@ fn insert_function_code(c2d_list:&Vec<&Message>,  file: &mut File, table_name:&s
             "{}",
             format!("---{} {}\n", message.message_name_full, message.comment)
         )?;
-        let s: Vec<String> = message
-            .field_array
+        let s: Vec<String> = message.field_array
             .iter()
             .map(|x| {
                 format!(
@@ -397,7 +403,7 @@ fn insert_function_code(c2d_list:&Vec<&Message>,  file: &mut File, table_name:&s
 
         // print
         if s.len() > 0 {
-            let params_1 = s.join(":%s, ");
+            let params_1 = s.join(":%s, ").as_str().to_owned() + ":%s";
             let params_2 = s.join(", ");
             write!(
                 file,
@@ -419,7 +425,7 @@ fn insert_function_code(c2d_list:&Vec<&Message>,  file: &mut File, table_name:&s
         }
 
         // end
-        write!(file, "{}", format!("end\n\n\n"))?;
+        write!(file, "{}", format!("end\n\n"))?;
     }
 
     Ok(())
