@@ -1,5 +1,10 @@
---auto generated--
 local SocialIsland_example_Ds_Handler = {	}
+
+---@class test_as_struct  test_as_struct 结构定义
+local test_as_struct = {
+	---int32  啊啊啊	st = nil, 
+	---int32  不不不	st2 = nil, 
+}
 
 ---test_1_arg_rsp  c2d test_1_arg_rsp 2个参数返回
 ---@param pa int32 决斗类型（武器）

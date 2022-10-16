@@ -1,5 +1,10 @@
---auto generated--
 local SocialIsland_example_Client_Handler = {	}
+
+---@class test_as_struct  test_as_struct 结构定义
+local test_as_struct = {
+	---int32  啊啊啊	st = nil, 
+	---int32  不不不	st2 = nil, 
+}
 
 ---test_only_req  c2d test_only_req
 function SocialIsland_example_Client_Handler.send_test_only_req()

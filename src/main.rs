@@ -1,12 +1,12 @@
+use regex::Regex;
 use std::fmt::Debug;
+use std::fs;
 use std::fs::File;
 use std::fs::OpenOptions;
-use std::io::BufReader;
 use std::io::prelude::*;
+use std::io::BufReader;
 use std::os::windows::fs::FileExt;
 use std::path::{Path, PathBuf};
-use std::fs;
-use regex::Regex;
 
 fn main() {
     // 第一个程序：读文件、正则匹配、文件结构parse、写文件
@@ -113,7 +113,8 @@ fn parse_file(filepath: &Path) -> std::io::Result<FileStruct> {
     // 3 name
     // 4 comment
     let re_field =
-        Regex::new("^[ \t]*(repeated)?[ \t]*(\\w+)[ \t]*([a-zA-Z_]\\w*).*;[ \t]*(?://+)?(.*)").unwrap();
+        Regex::new("^[ \t]*(repeated)?[ \t]*(\\w+)[ \t]*([a-zA-Z_]\\w*).*;[ \t]*(?://+)?(.*)")
+            .unwrap();
 
     // 2.FileStruct
     let mut file_struct: FileStruct = FileStruct::new();
@@ -242,7 +243,7 @@ fn parse_file(filepath: &Path) -> std::io::Result<FileStruct> {
                 // let rsp_message = &vec[j];
                 if vec[j].message_type == MessageType::Rsp
                     && vec[i].message_name_no_suffix.as_str()
-                    == vec[j].message_name_no_suffix.as_str()
+                        == vec[j].message_name_no_suffix.as_str()
                 {
                     vec[i].res_message = Some(&vec[j]);
                 }
@@ -254,28 +255,78 @@ fn parse_file(filepath: &Path) -> std::io::Result<FileStruct> {
     Ok(file_struct)
 }
 
-fn write_lua_file(mod_dir: &str, client_suffix: &str, ds_suffix: &str, file_struct: &FileStruct) -> std::io::Result<()> {
+fn write_lua_file(
+    mod_dir: &str,
+    client_suffix: &str,
+    ds_suffix: &str,
+    file_struct: &FileStruct,
+) -> std::io::Result<()> {
     // 4.将结果写入文件
-    let mut c2d_list: Vec<&Message> = file_struct.message_array.iter().filter(|x1| x1.message_type == MessageType::Req).map(|x2| x2).collect();
+    let mut c2d_list: Vec<&Message> = file_struct
+        .message_array
+        .iter()
+        .filter(|x1| x1.message_type == MessageType::Req)
+        .collect();
 
-    let mut d2c_list: Vec<&Message> = file_struct.message_array.iter().filter(|x1| x1.message_type == MessageType::Rsp || x1.message_type == MessageType::Notify).map(|x2| x2).collect();
+    let mut d2c_list: Vec<&Message> = file_struct
+        .message_array
+        .iter()
+        .filter(|x1| x1.message_type == MessageType::Rsp || x1.message_type == MessageType::Notify)
+        .collect();
+
+    let mut struct_list: Vec<&Message> = file_struct
+        .message_array
+        .iter()
+        .filter(|x1| x1.message_type == MessageType::Struct)
+        .collect();
 
     let mod_name = file_struct.game_mod.as_str();
     // GameLua.Mod.SocialIsland.Client.Handler.SocialIsland_Duel_Client_Handler
-    let ds_file = Path::new(mod_dir).join(mod_name).join("DS").join("Handler").join(format!("{}_{}{}.lua", file_struct.game_mod, file_struct.file_name, ds_suffix));
-    let client_file = Path::new(mod_dir).join(mod_name).join("Client").join("Handler").join(format!("{}_{}{}.lua", file_struct.game_mod, file_struct.file_name, client_suffix));
+    let ds_file = Path::new(mod_dir)
+        .join(mod_name)
+        .join("DS")
+        .join("Handler")
+        .join(format!(
+            "{}_{}{}.lua",
+            file_struct.game_mod, file_struct.file_name, ds_suffix
+        ));
+    let client_file = Path::new(mod_dir)
+        .join(mod_name)
+        .join("Client")
+        .join("Handler")
+        .join(format!(
+            "{}_{}{}.lua",
+            file_struct.game_mod, file_struct.file_name, client_suffix
+        ));
 
-    println!("ds_file{:?}", ds_file);
-    println!("client_file{:?}", client_file);
-
-
-    create_or_update_file(&mut c2d_list, &mut d2c_list, &ds_file, file_struct, true)?;
-    create_or_update_file(&mut d2c_list, &mut c2d_list, &client_file, file_struct, false)?;
+    create_or_update_file(
+        &mut c2d_list,
+        &mut d2c_list,
+        &mut struct_list,
+        &ds_file,
+        file_struct,
+        true,
+    )?;
+    create_or_update_file(
+        &mut d2c_list,
+        &mut c2d_list,
+        &mut struct_list,
+        &client_file,
+        file_struct,
+        false,
+    )?;
 
     Ok(())
 }
 
-fn create_or_update_file(on_msg_list: &mut Vec<&Message>, send_msg_list: &mut Vec<&Message>, path: &PathBuf, file_struct: &FileStruct, is_ds: bool) -> std::io::Result<()> {
+fn create_or_update_file(
+    on_msg_list: &mut Vec<&Message>,
+    send_msg_list: &mut Vec<&Message>,
+    struct_msg_list: &mut Vec<&Message>,
+    path: &PathBuf,
+    file_struct: &FileStruct,
+    is_ds: bool,
+) -> std::io::Result<()> {
     let mut dir = path.parent().unwrap();
     if false == dir.exists() {
         fs::create_dir_all(dir).expect("create failed");
@@ -289,21 +340,48 @@ fn create_or_update_file(on_msg_list: &mut Vec<&Message>, send_msg_list: &mut Ve
         // 读文件，如果未找到函数，或者函数签名不一致，则新增函数
         let mut buf_reader = BufReader::new(file);
 
-        // 1.构造正则
-        let mut re_vec: Vec<Regex> = vec![];
+        // 1.构造正则 on_xx send_xx struct
+        let mut re_list_on: Vec<Regex> = vec![];
         for message in on_msg_list.iter() {
+            if is_ds {
+                let res = format!(
+                    "^[ \t]*function[ \t]*{}\\.on_{}\\(playerUid, message\\)",
+                    table_name, message.message_name_full
+                );
+                re_list_on.push(Regex::new(res.as_str()).unwrap());
+            } else {
+                let res = format!(
+                    "^[ \t]*function[ \t]*{}\\.on_{}\\(message\\)",
+                    table_name, message.message_name_full
+                );
+                re_list_on.push(Regex::new(res.as_str()).unwrap());
+            }
+        }
+
+        let mut re_list_send: Vec<Regex> = vec![];
+        for message in send_msg_list.iter() {
             // params
-            let s: Vec<String> = message.field_array.iter().map(|x| x.field_name.to_string()).collect();
+            let s: Vec<String> = message
+                .field_array
+                .iter()
+                .map(|x| x.field_name.to_string())
+                .collect();
             let params = s.join(", ");
 
             let res = format!(
-                "^[ \t]*function {}.{}\\({}\\)",
+                "^[ \t]*function[ \t]*{}\\.send_{}\\({}\\)",
                 table_name, message.message_name_full, params
             );
-            let re_fun = Regex::new(res.as_str()).unwrap();
-            re_vec.push(re_fun);
+            re_list_send.push(Regex::new(res.as_str()).unwrap());
         }
 
+        let mut re_list_struct: Vec<Regex> = vec![];
+        for message in struct_msg_list.iter() {
+            let res = format!("^[ \t]*local[ \t]*{}", message.message_name_full);
+            re_list_struct.push(Regex::new(res.as_str()).unwrap());
+        }
+
+        // 2.遍历文件，剔除已经有了的结构。记录文件结尾的位置
         let mut last_pos = 0;
         let mut pos = 0;
         let mut append_pos = 0;
@@ -316,16 +394,19 @@ fn create_or_update_file(on_msg_list: &mut Vec<&Message>, send_msg_list: &mut Ve
                 break;
             }
 
-            for i in (0..re_vec.len()).rev() {
-                if re_vec[i].is_match(line) {
-                    // println!("exist func in {}", line);
-                    re_vec.remove(i);
-                    // 一次只可能匹配到一个，直接break
-                    on_msg_list.remove(i);
-
-                    break;
+            let lamda = | re_list:&mut Vec<Regex> ,msg_list:&mut Vec<&Message>|{
+                for i in (0..re_list.len()).rev() {
+                    if re_list[i].is_match(line) {
+                        // println!("exist func in {}", line);
+                        re_list.remove(i);
+                        msg_list.remove(i);
+                        break;
+                    }
                 }
-            }
+            };
+            lamda(&mut re_list_on,on_msg_list);
+            lamda(&mut re_list_send,send_msg_list);
+            lamda(&mut re_list_struct,struct_msg_list);
 
             // 找到return开始的地方，插入代码的地方
             if line.starts_with(format!("return {}", table_name).as_str()) {
@@ -333,7 +414,7 @@ fn create_or_update_file(on_msg_list: &mut Vec<&Message>, send_msg_list: &mut Ve
             }
         }
 
-        if on_msg_list.len() > 0 {
+        if on_msg_list.len() > 0 || send_msg_list.len() > 0 || struct_msg_list.len() > 0 {
             // 还剩下需要append的，加到后面
             let mut file = OpenOptions::new().write(true).open(path.as_path())?;
 
@@ -341,13 +422,22 @@ fn create_or_update_file(on_msg_list: &mut Vec<&Message>, send_msg_list: &mut Ve
             if append_pos == 0 {
                 // table define
                 write!(file, "{}", format!("local {} = {{\t}}\n\n", table_name))?;
-            } else { //追加
+            } else {
+                //追加
                 // 找到seek位置
                 file.seek_write(b"-----autogen update below-----\n\n", append_pos)?;
             }
 
             // functions
-            insert_function_code(&on_msg_list, &send_msg_list, &mut file, table_name, file_struct, is_ds)?;
+            insert_function_code(
+                &on_msg_list,
+                &send_msg_list,
+                &struct_msg_list,
+                &mut file,
+                table_name,
+                file_struct,
+                is_ds,
+            )?;
             // return
             write!(file, "{}", format!("return {}\n", table_name))?;
         }
@@ -360,7 +450,15 @@ fn create_or_update_file(on_msg_list: &mut Vec<&Message>, send_msg_list: &mut Ve
             write!(file, "{}", format!("local {} = {{\t}}\n\n", table_name))?;
 
             // functions
-            insert_function_code(&on_msg_list, &send_msg_list, &mut file, table_name, file_struct, is_ds)?;
+            insert_function_code(
+                &on_msg_list,
+                &send_msg_list,
+                &struct_msg_list,
+                &mut file,
+                table_name,
+                file_struct,
+                is_ds,
+            )?;
 
             // return
             write!(file, "{}", format!("return {}\n", table_name))?;
@@ -373,11 +471,48 @@ fn create_or_update_file(on_msg_list: &mut Vec<&Message>, send_msg_list: &mut Ve
 fn insert_function_code(
     on_msg_list: &Vec<&Message>,
     send_msg_list: &Vec<&Message>,
+    struct_msg_list: &Vec<&Message>,
     file: &mut File,
     table_name: &str,
     file_struct: &FileStruct,
     is_ds: bool,
 ) -> std::io::Result<()> {
+    // structs class hint
+    for message in struct_msg_list {
+        // class define
+        write!(
+            file,
+            "{}",
+            format!(
+                "---@class {} {}\n",
+                message.message_name_full, message.comment
+            )
+        )?;
+
+        // local
+        write!(
+            file,
+            "{}",
+            format!("local {} = {{\n", message.message_name_full)
+        )?;
+
+        let s: Vec<String> = message
+            .field_array
+            .iter()
+            .map(|x| {
+                format!(
+                    "\t---{} {}\t{} = nil, \n",
+                    x.field_type, x.comment, x.field_name
+                )
+            })
+            .collect();
+        let param_comment = s.join("");
+        // params
+        write!(file, "{}", param_comment)?;
+        // end
+        write!(file, "{}", format!("}}\n\n"))?;
+    }
+
     // send functions
     for message in send_msg_list {
         // comment
@@ -386,7 +521,8 @@ fn insert_function_code(
             "{}",
             format!("---{} {}\n", message.message_name_full, message.comment)
         )?;
-        let s: Vec<String> = message.field_array
+        let s: Vec<String> = message
+            .field_array
             .iter()
             .map(|x| {
                 format!(
@@ -442,15 +578,37 @@ fn insert_function_code(
         // content
         write!(file, "{}", format!("\tlocal res_param = {{\n"))?;
         // params
-        let s: Vec<String> = message.field_array.iter().map(|x1| format!("\t\t{} = {},\n", x1.field_name, x1.field_name)).collect();
+        let s: Vec<String> = message
+            .field_array
+            .iter()
+            .map(|x1| format!("\t\t{} = {},\n", x1.field_name, x1.field_name))
+            .collect();
         let params = s.join("");
         write!(file, "{}", format!("{}", params))?;
         write!(file, "{}", format!("\t}}\n"))?;
-        write!(file, "{}", format!("\tlocal ds_net = require(\"ds_net\")\n"))?;
+        write!(
+            file,
+            "{}",
+            format!("\tlocal ds_net = require(\"ds_net\")\n")
+        )?;
         if is_ds {
-            write!(file, "{}", format!("\tds_net.SendMessage(\"SocialIsland.{}\", res_param, playerUid)\n", message.message_name_full))?;
+            write!(
+                file,
+                "{}",
+                format!(
+                    "\tds_net.SendMessage(\"SocialIsland.{}\", res_param, playerUid)\n",
+                    message.message_name_full
+                )
+            )?;
         } else {
-            write!(file, "{}", format!("\tds_net.SendMessage(\"SocialIsland.{}\", res_param)\n", message.message_name_full))?;
+            write!(
+                file,
+                "{}",
+                format!(
+                    "\tds_net.SendMessage(\"SocialIsland.{}\", res_param)\n",
+                    message.message_name_full
+                )
+            )?;
         }
         write!(file, "{}", format!("end\n\n"))?;
     }
@@ -463,7 +621,8 @@ fn insert_function_code(
             "{}",
             format!("---{} {}\n", message.message_name_full, message.comment)
         )?;
-        let params_doc_comment_vec: Vec<String> = message.field_array
+        let params_doc_comment_vec: Vec<String> = message
+            .field_array
             .iter()
             .map(|x| {
                 format!(
@@ -516,23 +675,34 @@ fn insert_function_code(
             )?;
         }
 
-
         // rsp
         if let Some(ptr) = message.res_message {
-            println!("-----{}", message.message_name_full);
             for x in &file_struct.message_array {
                 unsafe {
                     if x.message_name_full == (*ptr).message_name_full {
                         write!(file, "{}", format!("\tlocal res_param = {{\n"))?;
                         // params
-                        let s: Vec<String> = x.field_array.iter()
+                        let s: Vec<String> = x
+                            .field_array
+                            .iter()
                             .map(|x1| format!("\t\t{} = {},\n", x1.field_name, x1.field_name))
                             .collect();
                         let params = s.join("");
                         write!(file, "{}", format!("{}", params))?;
                         write!(file, "{}", format!("\t}}\n"))?;
-                        write!(file, "{}", format!("\tlocal ds_net = require(\"ds_net\")\n"))?;
-                        write!(file, "{}", format!("\tds_net.SendMessage(\"SocialIsland.{}\", res_param, playerUid)\n", x.message_name_full))?;
+                        write!(
+                            file,
+                            "{}",
+                            format!("\tlocal ds_net = require(\"ds_net\")\n")
+                        )?;
+                        write!(
+                            file,
+                            "{}",
+                            format!(
+                                "\tds_net.SendMessage(\"SocialIsland.{}\", res_param, playerUid)\n",
+                                x.message_name_full
+                            )
+                        )?;
 
                         break;
                     }
