@@ -83,6 +83,30 @@ struct Field {
 }
 
 impl Field {
+    fn get_type_string(&self) -> String {
+        if self.is_array {
+            format!("{}[]", self.field_type)
+        } else {
+            self.field_type.to_owned()
+        }
+    }
+
+    fn get_default_value(&self) -> &str {
+        if self.is_array {
+            "{}"
+        } else {
+            match self.field_type.as_str() {
+                "int32" => "0",
+                "int64" => "0",
+                "string" => "",
+                "float" => "0",
+                _ => "nil",
+            }
+        }
+    }
+}
+
+impl Field {
     pub fn new() -> Field {
         Field {
             is_array: false,
@@ -93,6 +117,7 @@ impl Field {
     }
 }
 
+/// 解析文件，得到文件结构
 fn parse_file(filepath: &Path) -> std::io::Result<FileStruct> {
     // 可以使用lazy_static 来提高性能,但是这样会 无法代码提示.可以在程序稳定后进行替换
     //    lazy_static! {
@@ -255,6 +280,7 @@ fn parse_file(filepath: &Path) -> std::io::Result<FileStruct> {
     Ok(file_struct)
 }
 
+/// 写入lua文件
 fn write_lua_file(
     mod_dir: &str,
     client_suffix: &str,
@@ -281,7 +307,6 @@ fn write_lua_file(
         .collect();
 
     let mod_name = file_struct.game_mod.as_str();
-    // GameLua.Mod.SocialIsland.Client.Handler.SocialIsland_Duel_Client_Handler
     let ds_file = Path::new(mod_dir)
         .join(mod_name)
         .join("DS")
@@ -319,6 +344,7 @@ fn write_lua_file(
     Ok(())
 }
 
+/// 创建或更新文件
 fn create_or_update_file(
     on_msg_list: &mut Vec<&Message>,
     send_msg_list: &mut Vec<&Message>,
@@ -368,11 +394,19 @@ fn create_or_update_file(
                 .collect();
             let params = s.join(", ");
 
-            let res = format!(
-                "^[ \t]*function[ \t]*{}\\.send_{}\\({}\\)",
-                table_name, message.message_name_full, params
-            );
-            re_list_send.push(Regex::new(res.as_str()).unwrap());
+            if is_ds {
+                let res = format!(
+                    "^[ \t]*function[ \t]*{}\\.send_{}\\(playerUid, {}\\)",
+                    table_name, message.message_name_full, params
+                );
+                re_list_send.push(Regex::new(res.as_str()).unwrap());
+            } else {
+                let res = format!(
+                    "^[ \t]*function[ \t]*{}\\.send_{}\\({}\\)",
+                    table_name, message.message_name_full, params
+                );
+                re_list_send.push(Regex::new(res.as_str()).unwrap());
+            }
         }
 
         let mut re_list_struct: Vec<Regex> = vec![];
@@ -394,7 +428,7 @@ fn create_or_update_file(
                 break;
             }
 
-            let lamda = | re_list:&mut Vec<Regex> ,msg_list:&mut Vec<&Message>|{
+            let lamda = |re_list: &mut Vec<Regex>, msg_list: &mut Vec<&Message>| {
                 for i in (0..re_list.len()).rev() {
                     if re_list[i].is_match(line) {
                         // println!("exist func in {}", line);
@@ -404,9 +438,9 @@ fn create_or_update_file(
                     }
                 }
             };
-            lamda(&mut re_list_on,on_msg_list);
-            lamda(&mut re_list_send,send_msg_list);
-            lamda(&mut re_list_struct,struct_msg_list);
+            lamda(&mut re_list_on, on_msg_list);
+            lamda(&mut re_list_send, send_msg_list);
+            lamda(&mut re_list_struct, struct_msg_list);
 
             // 找到return开始的地方，插入代码的地方
             if line.starts_with(format!("return {}", table_name).as_str()) {
@@ -468,6 +502,7 @@ fn create_or_update_file(
     Ok(())
 }
 
+/// 插入函数代码
 fn insert_function_code(
     on_msg_list: &Vec<&Message>,
     send_msg_list: &Vec<&Message>,
@@ -479,6 +514,7 @@ fn insert_function_code(
 ) -> std::io::Result<()> {
     // structs class hint
     for message in struct_msg_list {
+        println!("insert_function_code  name:{}", message.message_name_full);
         // class define
         write!(
             file,
@@ -501,8 +537,11 @@ fn insert_function_code(
             .iter()
             .map(|x| {
                 format!(
-                    "\t---{} {}\t{} = nil, \n",
-                    x.field_type, x.comment, x.field_name
+                    "\t---{} {}\t{} = {}, \n",
+                    x.get_type_string(),
+                    x.comment,
+                    x.field_name,
+                    x.get_default_value()
                 )
             })
             .collect();
@@ -513,121 +552,20 @@ fn insert_function_code(
         write!(file, "{}", format!("}}\n\n"))?;
     }
 
-    // send functions
-    for message in send_msg_list {
-        // comment
-        write!(
-            file,
-            "{}",
-            format!("---{} {}\n", message.message_name_full, message.comment)
-        )?;
-        let s: Vec<String> = message
-            .field_array
-            .iter()
-            .map(|x| {
-                format!(
-                    "---@param {} {} {}\n",
-                    x.field_name, x.field_type, x.comment
-                )
-            })
-            .collect();
-        let param_comment = s.join("");
-        write!(file, "{}", param_comment)?;
-
-        // params
-        let s: Vec<String> = message
-            .field_array
-            .iter()
-            .map(|x| x.field_name.to_string())
-            .collect();
-        let params = s.join(", ");
-
-        // function
-        write!(
-            file,
-            "{}",
-            format!(
-                "function {}.send_{}({})\n",
-                table_name, message.message_name_full, params
-            )
-        )?;
-
-        // print
-        if s.len() > 0 {
-            let params_1 = s.join(":%s, ").as_str().to_owned() + ":%s";
-            let params_2 = s.join(", ");
-            write!(
-                file,
-                "{}",
-                format!(
-                    "\tprint(bWriteLog and string.format(\"{}.send_{} {}\",{}))\n",
-                    table_name, message.message_name_full, params_1, params_2
-                )
-            )?;
-        } else {
-            write!(
-                file,
-                "{}",
-                format!(
-                    "\tprint(bWriteLog and string.format(\"{}.send_{} \"))\n",
-                    table_name, message.message_name_full
-                )
-            )?;
-        }
-
-        // content
-        write!(file, "{}", format!("\tlocal res_param = {{\n"))?;
-        // params
-        let s: Vec<String> = message
-            .field_array
-            .iter()
-            .map(|x1| format!("\t\t{} = {},\n", x1.field_name, x1.field_name))
-            .collect();
-        let params = s.join("");
-        write!(file, "{}", format!("{}", params))?;
-        write!(file, "{}", format!("\t}}\n"))?;
-        write!(
-            file,
-            "{}",
-            format!("\tlocal ds_net = require(\"ds_net\")\n")
-        )?;
-        if is_ds {
-            write!(
-                file,
-                "{}",
-                format!(
-                    "\tds_net.SendMessage(\"SocialIsland.{}\", res_param, playerUid)\n",
-                    message.message_name_full
-                )
-            )?;
-        } else {
-            write!(
-                file,
-                "{}",
-                format!(
-                    "\tds_net.SendMessage(\"SocialIsland.{}\", res_param)\n",
-                    message.message_name_full
-                )
-            )?;
-        }
-        write!(file, "{}", format!("end\n\n"))?;
-    }
-
     // on functions
     for message in on_msg_list {
+        println!("insert_function_code  name:{}", message.message_name_full);
         // comment
-        write!(
-            file,
-            "{}",
-            format!("---{} {}\n", message.message_name_full, message.comment)
-        )?;
+        write!(file, "{}", format!("---{}\n", message.comment))?;
         let params_doc_comment_vec: Vec<String> = message
             .field_array
             .iter()
             .map(|x| {
                 format!(
                     "---@param {} {} {}\n",
-                    x.field_name, x.field_type, x.comment
+                    x.field_name,
+                    x.get_type_string(),
+                    x.comment
                 )
             })
             .collect();
@@ -677,33 +615,36 @@ fn insert_function_code(
 
         // rsp
         if let Some(ptr) = message.res_message {
-            for x in &file_struct.message_array {
+            for target_message in &file_struct.message_array {
                 unsafe {
-                    if x.message_name_full == (*ptr).message_name_full {
-                        write!(file, "{}", format!("\tlocal res_param = {{\n"))?;
+                    if target_message.message_name_full == (*ptr).message_name_full {
+                        println!(
+                            "--find rsp:{} for req:{}",
+                            target_message.message_name_full, message.message_name_full
+                        );
                         // params
-                        let s: Vec<String> = x
+                        let s: Vec<String> = target_message
                             .field_array
                             .iter()
-                            .map(|x1| format!("\t\t{} = {},\n", x1.field_name, x1.field_name))
+                            .map(|x| x.field_name.to_string())
                             .collect();
-                        let params = s.join("");
-                        write!(file, "{}", format!("{}", params))?;
-                        write!(file, "{}", format!("\t}}\n"))?;
-                        write!(
-                            file,
-                            "{}",
-                            format!("\tlocal ds_net = require(\"ds_net\")\n")
-                        )?;
+                        let params = s.join(", ");
+                        for x in &target_message.field_array {
+                            write!(
+                                file,
+                                "{}",
+                                format!("\tlocal {} = {}\n", x.field_name, x.get_default_value())
+                            )?;
+                        }
+
                         write!(
                             file,
                             "{}",
                             format!(
-                                "\tds_net.SendMessage(\"SocialIsland.{}\", res_param, playerUid)\n",
-                                x.message_name_full
+                                "\t{}.send_{}(playerUid, {})\n",
+                                table_name, target_message.message_name_full, params
                             )
                         )?;
-
                         break;
                     }
                 }
@@ -711,6 +652,116 @@ fn insert_function_code(
         }
 
         // end
+        write!(file, "{}", format!("end\n\n"))?;
+    }
+
+    // send functions
+    for message in send_msg_list {
+        println!("insert_function_code  name:{}", message.message_name_full);
+        // comment
+        write!(file, "{}", format!("---{}\n", message.comment))?;
+        let s: Vec<String> = message
+            .field_array
+            .iter()
+            .map(|x| {
+                format!(
+                    "---@param {} {} {}\n",
+                    x.field_name,
+                    x.get_type_string(),
+                    x.comment
+                )
+            })
+            .collect();
+        let param_comment = s.join("");
+        write!(file, "{}", param_comment)?;
+
+        // params
+        let s: Vec<String> = message
+            .field_array
+            .iter()
+            .map(|x| x.field_name.to_string())
+            .collect();
+        let params = s.join(", ");
+
+        // function
+        if is_ds {
+            write!(
+                file,
+                "{}",
+                format!(
+                    "function {}.send_{}(playerUid, {})\n",
+                    table_name, message.message_name_full, params
+                )
+            )?;
+        } else {
+            write!(
+                file,
+                "{}",
+                format!(
+                    "function {}.send_{}({})\n",
+                    table_name, message.message_name_full, params
+                )
+            )?;
+        }
+
+        // print
+        if s.len() > 0 {
+            let params_1 = s.join(":%s, ").as_str().to_owned() + ":%s";
+            let params_2 = s.join(", ");
+            write!(
+                file,
+                "{}",
+                format!(
+                    "\tprint(bWriteLog and string.format(\"{}.send_{} {}\",{}))\n",
+                    table_name, message.message_name_full, params_1, params_2
+                )
+            )?;
+        } else {
+            write!(
+                file,
+                "{}",
+                format!(
+                    "\tprint(bWriteLog and string.format(\"{}.send_{} \"))\n",
+                    table_name, message.message_name_full
+                )
+            )?;
+        }
+
+        // content
+        write!(file, "{}", format!("\tlocal res_param = {{\n"))?;
+        // params
+        let s: Vec<String> = message
+            .field_array
+            .iter()
+            .map(|x1| format!("\t\t{} = {},\n", x1.field_name, x1.field_name))
+            .collect();
+        let params = s.join("");
+        write!(file, "{}", format!("{}", params))?;
+        write!(file, "{}", format!("\t}}\n"))?;
+        write!(
+            file,
+            "{}",
+            format!("\tlocal ds_net = require(\"ds_net\")\n")
+        )?;
+        if is_ds {
+            write!(
+                file,
+                "{}",
+                format!(
+                    "\tds_net.SendMessage(\"{}.{}\", res_param, playerUid)\n",
+                    file_struct.game_mod, message.message_name_full
+                )
+            )?;
+        } else {
+            write!(
+                file,
+                "{}",
+                format!(
+                    "\tds_net.SendMessage(\"{}.{}\", res_param)\n",
+                    file_struct.game_mod, message.message_name_full
+                )
+            )?;
+        }
         write!(file, "{}", format!("end\n\n"))?;
     }
 
