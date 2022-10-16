@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package ds_client.SocialIsland;
+
+// test_as_struct 结构定义
+message test_as_struct
+{
+  int32 st = 1;		///// 啊啊啊
+  int32 st2 = 2;		// 不不不
+}
+
+// c2d test_only_req
+message test_only_req
+{
+//  int32 pa = 1;		//没参数
+}
+
+// c2d test_1_arg_req
+message test_1_arg_req
+{
+  int32 pa = 1;		// 1个参数
+}
+//定义enum
+enum ChannelType
+{
+  UnknownChannelType = 0;//未知类型
+  ChannelSocialIslandChat = 21;//岛屿聊天频道
+}
+
+// c2d test_1_arg_rsp 2个参数返回
+message test_1_arg_rsp
+{
+  int32 pa = 1;		//决斗类型（武器）
+  repeated int32 pb = 2;		//决斗类型（武器）
+}
+
+//d2c 参数中带有注释和没注释
+message test_notify
+{
+  //int32 n1 = 1; //comment
+  int32 nn1 = 1; // zhushi
+  int32 nocomment = 2;
+}
+
+//d2c被邀请方收到决斗申请 注释的协议
+//message test_notify_obsolute
+//{
+//  //int32 n1 = 1; //comment
+//  int32 nn1 = 1; // zhushi
+//}
+
+

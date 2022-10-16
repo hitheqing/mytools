@@ -4,19 +4,20 @@ use std::fs::OpenOptions;
 use std::io::BufReader;
 use std::io::prelude::*;
 use std::os::windows::fs::FileExt;
-use std::path::Path;
-
+use std::path::{Path, PathBuf};
+use std::fs;
 use regex::Regex;
 
 fn main() {
-    println!("Hello, world!");
-
     // 第一个程序：读文件、正则匹配、文件结构parse、写文件
-    let path = r"E:\trunk\Survive\Source\Lua\proto\ds_client\SocialIsland\Pso.proto";
+    let path = Path::new("./src/example.proto");
     let file_struct = parse_file(path).unwrap();
-    let gen_c2d_file = r"J:\myrust\mytools\src\c2d.lua";
-    let gen_d2c_file = r"J:\myrust\mytools\src\d2c.lua";
-    write_lua_file(gen_c2d_file, gen_d2c_file, &file_struct).unwrap();
+
+    let mod_dir = ".\\Mod";
+    let client_suffix = "_Client_Handle";
+    let ds_suffix = "_Ds_Handle";
+
+    write_lua_file(mod_dir, client_suffix, ds_suffix, &file_struct).unwrap();
 }
 
 enum State {
@@ -27,6 +28,7 @@ enum State {
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
 enum MessageType {
+    Struct,
     Req,
     Rsp,
     Notify,
@@ -36,6 +38,7 @@ enum MessageType {
 struct FileStruct {
     message_array: Vec<Message>,
     game_mod: String,
+    file_name: String,
 }
 
 impl FileStruct {
@@ -43,6 +46,7 @@ impl FileStruct {
         FileStruct {
             message_array: vec![],
             game_mod: "".to_string(),
+            file_name: "".to_string(),
         }
     }
 }
@@ -89,7 +93,7 @@ impl Field {
     }
 }
 
-fn parse_file(filepath: &str) -> std::io::Result<FileStruct> {
+fn parse_file(filepath: &Path) -> std::io::Result<FileStruct> {
     // 可以使用lazy_static 来提高性能,但是这样会 无法代码提示.可以在程序稳定后进行替换
     //    lazy_static! {
     //        static ref RE: Regex = Regex::new("...").unwrap();
@@ -99,20 +103,21 @@ fn parse_file(filepath: &str) -> std::io::Result<FileStruct> {
 
     // 1 name
     // 2 {
-    let re_message_define = Regex::new("^[ 	]*message *([a-zA-Z_]\\w*) *(\\{)?").unwrap();
-    let re_left_brace = Regex::new(" *(\\{)").unwrap();
-    let re_right_brace = Regex::new(" *(})").unwrap();
-    let re_comment = Regex::new("^[ 	]*//(.*)[\r|\n]+").unwrap();
-    let re_package = Regex::new("^[ 	]*package[ 	]*ds_client\\.([a-zA-Z_]\\w*)").unwrap();
+    let re_message_define = Regex::new("^[ \t]*message[ \t]*([a-zA-Z_]\\w*)[ \t]*(\\{)?").unwrap();
+    let re_left_brace = Regex::new("^[ \t]*(\\{)").unwrap();
+    let re_right_brace = Regex::new("^[ \t]*(})").unwrap();
+    let re_comment = Regex::new("^[ \t]*//(.*)[\r|\n]+").unwrap();
+    let re_package = Regex::new("^[ \t]*package[ \t]*ds_client\\.([a-zA-Z_]\\w*)").unwrap();
     // 1 repeated
     // 2 type
     // 3 name
     // 4 comment
     let re_field =
-        Regex::new("^[ 	]*(repeated)? *(\\w+) *([a-zA-Z_]\\w*) .*;(?://)? *(.*)").unwrap();
+        Regex::new("^[ \t]*(repeated)?[ \t]*(\\w+)[ \t]*([a-zA-Z_]\\w*).*;[ \t]*(?://+)?(.*)").unwrap();
 
     // 2.FileStruct
     let mut file_struct: FileStruct = FileStruct::new();
+    file_struct.file_name = filepath.file_stem().unwrap().to_str().unwrap().to_string();
 
     let mut state = State::Normal;
 
@@ -173,6 +178,8 @@ fn parse_file(filepath: &str) -> std::io::Result<FileStruct> {
                                 .strip_suffix("_notify")
                                 .unwrap()
                                 .to_string();
+                        } else {
+                            message.message_type = MessageType::Struct;
                         }
                     }
 
@@ -235,7 +242,7 @@ fn parse_file(filepath: &str) -> std::io::Result<FileStruct> {
                 // let rsp_message = &vec[j];
                 if vec[j].message_type == MessageType::Rsp
                     && vec[i].message_name_no_suffix.as_str()
-                        == vec[j].message_name_no_suffix.as_str()
+                    == vec[j].message_name_no_suffix.as_str()
                 {
                     vec[i].res_message = Some(&vec[j]);
                 }
@@ -243,37 +250,48 @@ fn parse_file(filepath: &str) -> std::io::Result<FileStruct> {
         }
     }
 
-    // println!("c2d_list.len() {}",c2d_list.len());
-    // println!("d2c_list.len() {}",d2c_list.len());
-
-    eprintln!("file_struct = {:#?}", file_struct);
+    // eprintln!("file_struct = {:#?}", file_struct);
     Ok(file_struct)
 }
 
-fn write_lua_file(ds_file: &str, client_file: &str, file_struct: &FileStruct) -> std::io::Result<()> {
+fn write_lua_file(mod_dir: &str, client_suffix: &str, ds_suffix: &str, file_struct: &FileStruct) -> std::io::Result<()> {
     // 4.将结果写入文件
     let mut c2d_list: Vec<&Message> = file_struct.message_array.iter().filter(|x1| x1.message_type == MessageType::Req).map(|x2| x2).collect();
 
     let mut d2c_list: Vec<&Message> = file_struct.message_array.iter().filter(|x1| x1.message_type == MessageType::Rsp || x1.message_type == MessageType::Notify).map(|x2| x2).collect();
 
-    create_or_update_file(&mut c2d_list, ds_file, file_struct)?;
-    create_or_update_file(&mut d2c_list, client_file, file_struct)?;
+    let mod_name = file_struct.game_mod.as_str();
+    // GameLua.Mod.SocialIsland.Client.Handler.SocialIsland_Duel_Client_Handler
+    let ds_file = Path::new(mod_dir).join(mod_name).join("DS").join("Handler").join(format!("{}_{}{}.lua", file_struct.game_mod, file_struct.file_name, ds_suffix));
+    let client_file = Path::new(mod_dir).join(mod_name).join("Client").join("Handler").join(format!("{}_{}{}.lua", file_struct.game_mod, file_struct.file_name, client_suffix));
+
+    println!("ds_file{:?}", ds_file);
+    println!("client_file{:?}", client_file);
+
+
+    create_or_update_file(&mut c2d_list, &mut d2c_list, &ds_file, file_struct, true)?;
+    create_or_update_file(&mut d2c_list, &mut c2d_list, &client_file, file_struct, false)?;
 
     Ok(())
 }
 
-fn create_or_update_file(insert_msg_list: &mut Vec<&Message>, path: &str, file_struct: &FileStruct) -> std::io::Result<()> {
-    //c2d file gen
+fn create_or_update_file(on_msg_list: &mut Vec<&Message>, send_msg_list: &mut Vec<&Message>, path: &PathBuf, file_struct: &FileStruct, is_ds: bool) -> std::io::Result<()> {
+    let mut dir = path.parent().unwrap();
+    if false == dir.exists() {
+        fs::create_dir_all(dir).expect("create failed");
+    }
+
+    let table_name = path.file_stem().unwrap().to_str().unwrap();
+    // file gen
     if let Ok(mut file) = File::open(path) {
-        println!("----open file {}----", path);
+        println!("----open file {}----", path.as_path().to_str().unwrap());
 
         // 读文件，如果未找到函数，或者函数签名不一致，则新增函数
         let mut buf_reader = BufReader::new(file);
-        let table_name = Path::new(path).file_stem().unwrap().to_str().unwrap();
 
         // 1.构造正则
         let mut re_vec: Vec<Regex> = vec![];
-        for message in insert_msg_list.iter() {
+        for message in on_msg_list.iter() {
             // params
             let s: Vec<String> = message.field_array.iter().map(|x| x.field_name.to_string()).collect();
             let params = s.join(", ");
@@ -286,9 +304,9 @@ fn create_or_update_file(insert_msg_list: &mut Vec<&Message>, path: &str, file_s
             re_vec.push(re_fun);
         }
 
-        let mut last_pos = 1;
-        let mut pos = 1;
-        let mut append_pos = 1;
+        let mut last_pos = 0;
+        let mut pos = 0;
+        let mut append_pos = 0;
         loop {
             let line = &mut String::new();
             let read_len = buf_reader.read_line(line);
@@ -303,7 +321,7 @@ fn create_or_update_file(insert_msg_list: &mut Vec<&Message>, path: &str, file_s
                     // println!("exist func in {}", line);
                     re_vec.remove(i);
                     // 一次只可能匹配到一个，直接break
-                    insert_msg_list.remove(i);
+                    on_msg_list.remove(i);
 
                     break;
                 }
@@ -315,30 +333,34 @@ fn create_or_update_file(insert_msg_list: &mut Vec<&Message>, path: &str, file_s
             }
         }
 
-        if insert_msg_list.len() > 0 {
+        if on_msg_list.len() > 0 {
             // 还剩下需要append的，加到后面
-            let mut file = OpenOptions::new().write(true).open(path)?;
-            // 找到seek位置
-            file.seek_write(b"-----autogen update below-----\n\n", append_pos)?;
+            let mut file = OpenOptions::new().write(true).open(path.as_path())?;
+
+            // 文件清空内容重新构造
+            if append_pos == 0 {
+                // table define
+                write!(file, "{}", format!("local {} = {{\t}}\n\n", table_name))?;
+            } else { //追加
+                // 找到seek位置
+                file.seek_write(b"-----autogen update below-----\n\n", append_pos)?;
+            }
 
             // functions
-            insert_function_code(&insert_msg_list, &mut file, table_name, file_struct)?;
-
+            insert_function_code(&on_msg_list, &send_msg_list, &mut file, table_name, file_struct, is_ds)?;
             // return
             write!(file, "{}", format!("return {}\n", table_name))?;
         }
     } else {
-        if let Ok(mut file) = File::create(path) {
-            println!("----create file {}----", path);
+        if let Ok(mut file) = File::create(path.as_path()) {
+            println!("----create file {}----", path.as_path().to_str().unwrap());
             write!(file, "--auto generated--\n")?;
-
-            let table_name = Path::new(path).file_stem().unwrap().to_str().unwrap();
 
             // table define
             write!(file, "{}", format!("local {} = {{\t}}\n\n", table_name))?;
 
             // functions
-            insert_function_code(&insert_msg_list, &mut file, table_name, file_struct)?;
+            insert_function_code(&on_msg_list, &send_msg_list, &mut file, table_name, file_struct, is_ds)?;
 
             // return
             write!(file, "{}", format!("return {}\n", table_name))?;
@@ -349,13 +371,15 @@ fn create_or_update_file(insert_msg_list: &mut Vec<&Message>, path: &str, file_s
 }
 
 fn insert_function_code(
-    c2d_list: &Vec<&Message>,
+    on_msg_list: &Vec<&Message>,
+    send_msg_list: &Vec<&Message>,
     file: &mut File,
     table_name: &str,
     file_struct: &FileStruct,
+    is_ds: bool,
 ) -> std::io::Result<()> {
-    // functions
-    for message in c2d_list {
+    // send functions
+    for message in send_msg_list {
         // comment
         write!(
             file,
@@ -387,7 +411,7 @@ fn insert_function_code(
             file,
             "{}",
             format!(
-                "function {}.{}({})\n",
+                "function {}.send_{}({})\n",
                 table_name, message.message_name_full, params
             )
         )?;
@@ -400,7 +424,84 @@ fn insert_function_code(
                 file,
                 "{}",
                 format!(
-                    "\tprint(bWriteLog and string.format(\"{}.{} {}\",{}))\n",
+                    "\tprint(bWriteLog and string.format(\"{}.send_{} {}\",{}))\n",
+                    table_name, message.message_name_full, params_1, params_2
+                )
+            )?;
+        } else {
+            write!(
+                file,
+                "{}",
+                format!(
+                    "\tprint(bWriteLog and string.format(\"{}.send_{} \"))\n",
+                    table_name, message.message_name_full
+                )
+            )?;
+        }
+
+        // content
+        write!(file, "{}", format!("\tlocal res_param = {{\n"))?;
+        // params
+        let s: Vec<String> = message.field_array.iter().map(|x1| format!("\t\t{} = {},\n", x1.field_name, x1.field_name)).collect();
+        let params = s.join("");
+        write!(file, "{}", format!("{}", params))?;
+        write!(file, "{}", format!("\t}}\n"))?;
+        write!(file, "{}", format!("\tlocal ds_net = require(\"ds_net\")\n"))?;
+        if is_ds {
+            write!(file, "{}", format!("\tds_net.SendMessage(\"SocialIsland.{}\", res_param, playerUid)\n", message.message_name_full))?;
+        } else {
+            write!(file, "{}", format!("\tds_net.SendMessage(\"SocialIsland.{}\", res_param)\n", message.message_name_full))?;
+        }
+        write!(file, "{}", format!("end\n\n"))?;
+    }
+
+    // on functions
+    for message in on_msg_list {
+        // comment
+        write!(
+            file,
+            "{}",
+            format!("---{} {}\n", message.message_name_full, message.comment)
+        )?;
+        let params_doc_comment_vec: Vec<String> = message.field_array
+            .iter()
+            .map(|x| {
+                format!(
+                    "---@param {} {} {}\n",
+                    x.field_name, x.field_type, x.comment
+                )
+            })
+            .collect();
+        let param_comment = params_doc_comment_vec.join("");
+        write!(file, "{}", param_comment)?;
+
+        // params
+        let params_vec: Vec<String> = message
+            .field_array
+            .iter()
+            .map(|x| x.field_name.to_string())
+            .collect();
+        let params = params_vec.join(", ");
+
+        // function
+        write!(
+            file,
+            "{}",
+            format!(
+                "function {}.on_{}(playerUid, message)\n",
+                table_name, message.message_name_full
+            )
+        )?;
+
+        // print
+        if params_vec.len() > 0 {
+            let params_1 = format!("{}{}", params_vec.join(":%s, "), ":%s");
+            let params_2 = format!("{}{}", "message.", params_vec.join(", message."));
+            write!(
+                file,
+                "{}",
+                format!(
+                    "\tprint(bWriteLog and string.format(\"{}.on_{} {}\",{}))\n",
                     table_name, message.message_name_full, params_1, params_2
                 )
             )?;
@@ -415,38 +516,29 @@ fn insert_function_code(
             )?;
         }
 
-        // content
-        write!(file, "{}", format!("\tlocal res_param = {{\n"))?;
-        // params
-        let s: Vec<String> = message.field_array.iter().map(|x1| format!("\t\t{} = {},\n", x1.field_name, x1.field_name)).collect();
-        let params = s.join("");
-        write!(file, "{}", format!("{}", params))?;
-        write!(file, "{}", format!("\t}}\n"))?;
-        write!(file, "{}", format!("\tlocal ds_net = require(\"ds_net\")\n"))?;
-        write!(file, "{}", format!("\tds_net.SendMessage(\"SocialIsland.{}\", res_param, playerUid)\n", message.message_name_full))?;
 
         // rsp
-        // if let Some(ptr) = message.res_message {
-        //     println!("-----{}",message.message_name_full);
-        //     for x in &file_struct.message_array {
-        //         unsafe {
-        //             if x.message_name_full == (*ptr).message_name_full {
-        //                 write!(file, "{}", format!("\tlocal res_param = {{\n"))?;
-        //                 // params
-        //                 let s:Vec<String> = x.field_array.iter()
-        //                     .map(|x1| format!("\t\t{} = {},\n",x1.field_name,x1.field_name))
-        //                     .collect();
-        //                 let params = s.join("");
-        //                 write!(file, "{}", format!("{}",params))?;
-        //                 write!(file, "{}", format!("\t}}\n"))?;
-        //                 write!(file, "{}", format!("\tlocal ds_net = require(\"ds_net\")\n"))?;
-        //                 write!(file, "{}", format!("\tds_net.SendMessage(\"SocialIsland.{}\", res_param, playerUid)\n",x.message_name_full))?;
-        //
-        //                 break
-        //             }
-        //         }
-        //     }
-        // }
+        if let Some(ptr) = message.res_message {
+            println!("-----{}", message.message_name_full);
+            for x in &file_struct.message_array {
+                unsafe {
+                    if x.message_name_full == (*ptr).message_name_full {
+                        write!(file, "{}", format!("\tlocal res_param = {{\n"))?;
+                        // params
+                        let s: Vec<String> = x.field_array.iter()
+                            .map(|x1| format!("\t\t{} = {},\n", x1.field_name, x1.field_name))
+                            .collect();
+                        let params = s.join("");
+                        write!(file, "{}", format!("{}", params))?;
+                        write!(file, "{}", format!("\t}}\n"))?;
+                        write!(file, "{}", format!("\tlocal ds_net = require(\"ds_net\")\n"))?;
+                        write!(file, "{}", format!("\tds_net.SendMessage(\"SocialIsland.{}\", res_param, playerUid)\n", x.message_name_full))?;
+
+                        break;
+                    }
+                }
+            }
+        }
 
         // end
         write!(file, "{}", format!("end\n\n"))?;
