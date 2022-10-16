@@ -1,3 +1,4 @@
+--auto generated--
 local SocialIsland_Duel_Client_Handler = {	}
 local ds_net = require("ds_net")
 

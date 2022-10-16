@@ -10,15 +10,19 @@ use std::path::{Path, PathBuf};
 
 fn main() {
     // 第一个程序：读文件、正则匹配、文件结构parse、写文件
-    let path = Path::new("./src/example.proto");
-    let path = Path::new("./src/Duel.proto");
-    let file_struct = parse_file(path).unwrap();
 
-    let mod_dir = ".\\Mod";
-    let client_suffix = "_Client_Handler";
-    let ds_suffix = "_Ds_Handler";
+    let dir = Path::new("./src");
+    if let Ok(vec) = parse_dir(dir) {
+        let mod_dir = ".\\Mod";
+        let client_suffix = "_Client_Handler";
+        let ds_suffix = "_Ds_Handler";
 
-    write_lua_file(mod_dir, client_suffix, ds_suffix, &file_struct).unwrap();
+        for file_struct in &vec {
+            if let Ok(_) = write_lua_file(mod_dir, client_suffix, ds_suffix, file_struct) {
+
+            }
+        }
+    }
 }
 
 enum State {
@@ -121,6 +125,26 @@ impl Field {
             }
         }
     }
+}
+
+fn parse_dir(dir: &Path) -> std::io::Result<Vec<FileStruct>> {
+    let mut result: Vec<FileStruct> = vec![];
+    let dir = fs::read_dir(dir).unwrap();
+
+    for entry in dir {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() {
+            let extension = path.extension().unwrap().to_str().unwrap();
+            if extension == "proto" {
+                if let Ok(fs) = parse_file(path.as_path()) {
+                    result.push(fs)
+                }
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 /// 解析文件，得到文件结构
@@ -422,13 +446,13 @@ fn create_or_update_file(
         }
 
         // 2.遍历文件，剔除已经有了的结构。记录文件结尾的位置
-        let mut last_pos = 0;
+
         let mut pos = 0;
         let mut append_pos = 0;
         loop {
             let line = &mut String::new();
             let read_len = buf_reader.read_line(line);
-            last_pos = pos;
+            let last_pos  = pos;
             pos = buf_reader.stream_position()?;
             if read_len.unwrap() == 0 {
                 break;
@@ -492,8 +516,8 @@ fn create_or_update_file(
             write!(file, "--auto generated--\n")?;
 
             // table define
-            write!(file, "{}", format!("local {} = {{\t}}\n\n", table_name))?;
-            write!(file, "{}", format!("local ds_net = require(\"ds_net\")\n"))?;
+            write!(file, "{}", format!("local {} = {{\t}}\n", table_name))?;
+            write!(file, "{}", format!("local ds_net = require(\"ds_net\")\n\n"))?;
 
             // functions
             insert_function_code(
