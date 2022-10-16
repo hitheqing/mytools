@@ -14,8 +14,8 @@ fn main() {
     let file_struct = parse_file(path).unwrap();
 
     let mod_dir = ".\\Mod";
-    let client_suffix = "_Client_Handle";
-    let ds_suffix = "_Ds_Handle";
+    let client_suffix = "_Client_Handler";
+    let ds_suffix = "_Ds_Handler";
 
     write_lua_file(mod_dir, client_suffix, ds_suffix, &file_struct).unwrap();
 }
