@@ -455,7 +455,12 @@ fn create_or_update_file(
             // 文件清空内容重新构造
             if append_pos == 0 {
                 // table define
-                write!(file, "{}", format!("local {} = {{\t}}\n\n", table_name))?;
+                write!(file, "{}", format!("local {} = {{\t}}\n", table_name))?;
+                write!(
+                    file,
+                    "{}",
+                    format!("local ds_net = require(\"ds_net\")\n\n")
+                )?;
             } else {
                 //追加
                 // 找到seek位置
@@ -482,6 +487,11 @@ fn create_or_update_file(
 
             // table define
             write!(file, "{}", format!("local {} = {{\t}}\n\n", table_name))?;
+            write!(
+                file,
+                "{}",
+                format!("\tlocal ds_net = require(\"ds_net\")\n")
+            )?;
 
             // functions
             insert_function_code(
@@ -738,11 +748,7 @@ fn insert_function_code(
         let params = s.join("");
         write!(file, "{}", format!("{}", params))?;
         write!(file, "{}", format!("\t}}\n"))?;
-        write!(
-            file,
-            "{}",
-            format!("\tlocal ds_net = require(\"ds_net\")\n")
-        )?;
+
         if is_ds {
             write!(
                 file,

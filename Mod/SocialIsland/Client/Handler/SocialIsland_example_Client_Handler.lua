@@ -1,4 +1,5 @@
 local SocialIsland_example_Client_Handler = {	}
+local ds_net = require("ds_net")
 
 ---@class test_as_struct  test_as_struct 结构定义
 local test_as_struct = {
@@ -25,7 +26,6 @@ function SocialIsland_example_Client_Handler.send_test_only_req()
 	print(bWriteLog and string.format("SocialIsland_example_Client_Handler.send_test_only_req "))
 	local res_param = {
 	}
-	local ds_net = require("ds_net")
 	ds_net.SendMessage("SocialIsland.test_only_req", res_param)
 end
 
@@ -36,7 +36,6 @@ function SocialIsland_example_Client_Handler.send_test_1_arg_req(pa)
 	local res_param = {
 		pa = pa,
 	}
-	local ds_net = require("ds_net")
 	ds_net.SendMessage("SocialIsland.test_1_arg_req", res_param)
 end
 

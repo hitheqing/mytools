@@ -1,4 +1,5 @@
 local SocialIsland_example_Ds_Handler = {	}
+local ds_net = require("ds_net")
 
 ---@class test_as_struct  test_as_struct 结构定义
 local test_as_struct = {
@@ -29,7 +30,6 @@ function SocialIsland_example_Ds_Handler.send_test_1_arg_rsp(playerUid, pa, pb)
 		pa = pa,
 		pb = pb,
 	}
-	local ds_net = require("ds_net")
 	ds_net.SendMessage("SocialIsland.test_1_arg_rsp", res_param, playerUid)
 end
 
@@ -42,7 +42,6 @@ function SocialIsland_example_Ds_Handler.send_test_notify(playerUid, nn1, nocomm
 		nn1 = nn1,
 		nocomment = nocomment,
 	}
-	local ds_net = require("ds_net")
 	ds_net.SendMessage("SocialIsland.test_notify", res_param, playerUid)
 end
 
