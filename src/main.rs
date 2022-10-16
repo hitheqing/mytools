@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 fn main() {
     // 第一个程序：读文件、正则匹配、文件结构parse、写文件
     let path = Path::new("./src/example.proto");
+    let path = Path::new("./src/Duel.proto");
     let file_struct = parse_file(path).unwrap();
 
     let mod_dir = ".\\Mod";
@@ -83,11 +84,27 @@ struct Field {
 }
 
 impl Field {
+    fn new() -> Field {
+        Field {
+            is_array: false,
+            field_name: "".to_string(),
+            field_type: "".to_string(),
+            comment: "".to_string(),
+        }
+    }
+
     fn get_type_string(&self) -> String {
         if self.is_array {
             format!("{}[]", self.field_type)
         } else {
-            self.field_type.to_owned()
+            // self.field_type.to_owned()
+            match self.field_type.as_str() {
+                "int32" => "number".to_string(),
+                "int64" => "number".to_string(),
+                "string" => "".to_string(),
+                "float" => "number".to_string(),
+                _ => self.field_type.to_owned(),
+            }
         }
     }
 
@@ -102,17 +119,6 @@ impl Field {
                 "float" => "0",
                 _ => "nil",
             }
-        }
-    }
-}
-
-impl Field {
-    pub fn new() -> Field {
-        Field {
-            is_array: false,
-            field_name: "".to_string(),
-            field_type: "".to_string(),
-            comment: "".to_string(),
         }
     }
 }
@@ -353,14 +359,14 @@ fn create_or_update_file(
     file_struct: &FileStruct,
     is_ds: bool,
 ) -> std::io::Result<()> {
-    let mut dir = path.parent().unwrap();
+    let dir = path.parent().unwrap();
     if false == dir.exists() {
         fs::create_dir_all(dir).expect("create failed");
     }
 
     let table_name = path.file_stem().unwrap().to_str().unwrap();
     // file gen
-    if let Ok(mut file) = File::open(path) {
+    if let Ok(file) = File::open(path) {
         println!("----open file {}----", path.as_path().to_str().unwrap());
 
         // 读文件，如果未找到函数，或者函数签名不一致，则新增函数
@@ -487,11 +493,7 @@ fn create_or_update_file(
 
             // table define
             write!(file, "{}", format!("local {} = {{\t}}\n\n", table_name))?;
-            write!(
-                file,
-                "{}",
-                format!("\tlocal ds_net = require(\"ds_net\")\n")
-            )?;
+            write!(file, "{}", format!("local ds_net = require(\"ds_net\")\n"))?;
 
             // functions
             insert_function_code(
@@ -588,17 +590,27 @@ fn insert_function_code(
             .iter()
             .map(|x| x.field_name.to_string())
             .collect();
-        let params = params_vec.join(", ");
 
         // function
-        write!(
-            file,
-            "{}",
-            format!(
-                "function {}.on_{}(playerUid, message)\n",
-                table_name, message.message_name_full
-            )
-        )?;
+        if is_ds {
+            write!(
+                file,
+                "{}",
+                format!(
+                    "function {}.on_{}(playerUid, message)\n",
+                    table_name, message.message_name_full
+                )
+            )?;
+        } else {
+            write!(
+                file,
+                "{}",
+                format!(
+                    "function {}.on_{}(message)\n",
+                    table_name, message.message_name_full
+                )
+            )?;
+        }
 
         // print
         if params_vec.len() > 0 {

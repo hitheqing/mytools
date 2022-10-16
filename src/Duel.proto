@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package ds_client.SocialIsland;
+
+
+
+//请求发起决斗
+message social_island_duel_start_req
+{
+	int64 orign_uid = 1;				//uid
+	int64 duel_target_uid = 2;	//目标uid
+	int32 duel_type = 3;		//决斗类型（武器）
+}
+
+//发起端收到反馈
+message social_island_duel_start_rsp
+{
+	int64 orign_uid = 1;	
+	int64 duel_target_uid = 2;	//目标uid
+	int32 duel_response = 3;		//决斗反馈
+}
+
+
+//被邀请方收到决斗申请
+message social_island_duel_apply_notify
+{
+	int64 orign_uid = 1;	//发起方uid
+	int32 duel_type = 2;	//决斗类型（武器）
+}
+
+//被邀请方对申请进行反馈 client->ds
+message social_island_response_duel_req
+{
+	int64 orign_uid = 1;	//发起方uid
+	int64 duel_target_uid = 2;
+	int32 duel_type = 3;	//决斗类型（武器）
+	int32 duel_response = 4;		//决斗反馈
+}
+
+//通知决斗结算
+message social_island_duel_result_notify
+{
+	int64 duel_target_uid = 1;
+	int32 duel_type = 2;	//决斗类型（武器）
+	int64 winner_uid = 3;		//决斗反馈
+}
