@@ -665,13 +665,6 @@ fn insert_function_code(
         let param_comment = params_doc_comment_vec.join("");
         write!(file, "{}", param_comment)?;
 
-        // params
-        let params_vec: Vec<String> = message
-            .field_array
-            .iter()
-            .map(|x| x.field_name.to_string())
-            .collect();
-
         // function
         if is_ds {
             write!(
@@ -694,15 +687,13 @@ fn insert_function_code(
         }
 
         // print
-        if params_vec.len() > 0 {
-            let params_1 = format!("{}{}", params_vec.join(":%s, "), ":%s");
-            let params_2 = format!("{}{}", "message.", params_vec.join(", message."));
+        if message.field_array.len() > 0 {
             write!(
                 file,
                 "{}",
                 format!(
                     "\tprint(bWriteLog and string.format(\"{}.on_{} {}\",{}))\n",
-                    table_name, message.message_name_full, params_1, params_2
+                    table_name, message.message_name_full, message.get_print_params_format_str(), message.get_params_str_in_func(false,false)
                 )
             )?;
         } else {
@@ -733,13 +724,12 @@ fn insert_function_code(
                             )?;
                         }
 
-                        let params = target_message.get_params_str_in_func(true,false);
                         write!(
                             file,
                             "{}",
                             format!(
                                 "\t{}.send_{}(playerUid{})\n",
-                                table_name, target_message.message_name_full, params
+                                table_name, target_message.message_name_full, target_message.get_params_str_in_func(true,false)
                             )
                         )?;
                         break;
@@ -800,20 +790,14 @@ fn insert_function_code(
 
         // print
         if message.field_array.len() > 0 {
-            // params
-            let s: Vec<String> = message
-                .field_array
-                .iter()
-                .map(|x| x.field_name.to_string())
-                .collect();
-            let params_1 = s.join(":%s, ").as_str().to_owned() + ":%s";
-            let params_2 = s.join(", ");
+            let s1 = message.get_print_params_format_str();
+            let s2 = message.get_params_str_in_func(false,false);
             write!(
                 file,
                 "{}",
                 format!(
                     "\tprint(bWriteLog and string.format(\"{}.send_{} {}\",{}))\n",
-                    table_name, message.message_name_full, params_1, params_2
+                    table_name, message.message_name_full, s1, s2
                 )
             )?;
         } else {
@@ -906,6 +890,10 @@ struct Message {
 }
 
 impl Message {
+
+}
+
+impl Message {
     pub fn new() -> Message {
         Message {
             message_type: MessageType::Req,
@@ -919,13 +907,13 @@ impl Message {
 
     pub fn get_params_str_in_func(&self, need_prefix:bool,need_suffix:bool)->String{
         // params
-        let s: Vec<String> = self
+        let fieldnames: Vec<String> = self
             .field_array
             .iter()
             .map(|x| x.field_name.to_string())
             .collect();
-        let mut params = s.join(", ");
-        if s.len() > 0 {
+        let mut params = fieldnames.join(", ");
+        if fieldnames.len() > 0 {
             if need_prefix {
                 params = format!(", {}", params);
             }
@@ -936,6 +924,17 @@ impl Message {
             params = "".to_string();
         }
         params
+    }
+
+    pub(crate) fn get_print_params_format_str(&self) -> String {
+        // params
+        let s: Vec<String> = self
+            .field_array
+            .iter()
+            .map(|x| x.field_name.to_string())
+            .collect();
+        let params_1 = s.join(":%s, ").as_str().to_owned() + ":%s";
+        params_1
     }
 }
 
