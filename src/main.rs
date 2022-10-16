@@ -473,21 +473,16 @@ fn create_or_update_file(
 
         let mut re_list_send: Vec<Regex> = vec![];
         for message in send_msg_list.iter() {
-            // params
-            let s: Vec<String> = message
-                .field_array
-                .iter()
-                .map(|x| x.field_name.to_string())
-                .collect();
-            let params = s.join(", ");
-
             if is_ds {
+                let params = message.get_params_str_in_func(true,false);
+                // 参数可能为0
                 let res = format!(
-                    "^[ \t]*function[ \t]*{}\\.send_{}\\(playerUid, {}\\)",
+                    "^[ \t]*function[ \t]*{}\\.send_{}\\(playerUid{}\\)",
                     table_name, message.message_name_full, params
                 );
                 re_list_send.push(Regex::new(res.as_str()).unwrap());
             } else {
+                let params = message.get_params_str_in_func(false,false);
                 let res = format!(
                     "^[ \t]*function[ \t]*{}\\.send_{}\\({}\\)",
                     table_name, message.message_name_full, params
@@ -730,13 +725,6 @@ fn insert_function_code(
                             "--find rsp:{} for req:{}",
                             target_message.message_name_full, message.message_name_full
                         );
-                        // params
-                        let s: Vec<String> = target_message
-                            .field_array
-                            .iter()
-                            .map(|x| x.field_name.to_string())
-                            .collect();
-                        let params = s.join(", ");
                         for x in &target_message.field_array {
                             write!(
                                 file,
@@ -745,11 +733,12 @@ fn insert_function_code(
                             )?;
                         }
 
+                        let params = target_message.get_params_str_in_func(true,false);
                         write!(
                             file,
                             "{}",
                             format!(
-                                "\t{}.send_{}(playerUid, {})\n",
+                                "\t{}.send_{}(playerUid{})\n",
                                 table_name, target_message.message_name_full, params
                             )
                         )?;
@@ -783,25 +772,21 @@ fn insert_function_code(
         let param_comment = s.join("");
         write!(file, "{}", param_comment)?;
 
-        // params
-        let s: Vec<String> = message
-            .field_array
-            .iter()
-            .map(|x| x.field_name.to_string())
-            .collect();
-        let params = s.join(", ");
+
 
         // function
         if is_ds {
+            let params = message.get_params_str_in_func(true,false);
             write!(
                 file,
                 "{}",
                 format!(
-                    "function {}.send_{}(playerUid, {})\n",
+                    "function {}.send_{}(playerUid{})\n",
                     table_name, message.message_name_full, params
                 )
             )?;
         } else {
+            let params = message.get_params_str_in_func(false,false);
             write!(
                 file,
                 "{}",
@@ -812,8 +797,15 @@ fn insert_function_code(
             )?;
         }
 
+
         // print
-        if s.len() > 0 {
+        if message.field_array.len() > 0 {
+            // params
+            let s: Vec<String> = message
+                .field_array
+                .iter()
+                .map(|x| x.field_name.to_string())
+                .collect();
             let params_1 = s.join(":%s, ").as_str().to_owned() + ":%s";
             let params_2 = s.join(", ");
             write!(
@@ -923,6 +915,27 @@ impl Message {
             comment: "".to_string(),
             res_message: None,
         }
+    }
+
+    pub fn get_params_str_in_func(&self, need_prefix:bool,need_suffix:bool)->String{
+        // params
+        let s: Vec<String> = self
+            .field_array
+            .iter()
+            .map(|x| x.field_name.to_string())
+            .collect();
+        let mut params = s.join(", ");
+        if s.len() > 0 {
+            if need_prefix {
+                params = format!(", {}", params);
+            }
+            if need_suffix {
+                params = format!("{}, ", params);
+            }
+        } else {
+            params = "".to_string();
+        }
+        params
     }
 }
 
