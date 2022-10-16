@@ -9,122 +9,170 @@ use std::os::windows::fs::FileExt;
 use std::path::{Path, PathBuf};
 
 fn main() {
-    // 第一个程序：读文件、正则匹配、文件结构parse、写文件
+    // parse args
+    // let dir = r"E:\Lua\proto\ds_client";
+    let v: Vec<String> = std::env::args().collect();
+    let args_s = v.join(" ");
+    eprintln!("args_s = {:#?}", args_s);
 
-    let dir = Path::new("./src");
+    let exe_path = std::env::args().nth(0).unwrap();
+    let mut arg1: String;
+    let mut dir = Path::new(exe_path.as_str());
+    if std::env::args().nth(1).is_some() {
+        arg1 = std::env::args().nth(1).unwrap();
+        dir = Path::new(arg1.as_str());
+    }
+
+    // let dir = Path::new("./src"); // for project test
+    // let dir = Path::new(r"E:\Lua\proto\ds_client\SocialIsland"); // real
+    // 第一个程序：读文件、正则匹配、文件结构parse、写文件
     if let Ok(vec) = parse_dir(dir) {
         let mod_dir = ".\\Mod";
         let client_suffix = "_Client_Handler";
         let ds_suffix = "_Ds_Handler";
 
         for file_struct in &vec {
-            if let Ok(_) = write_lua_file(mod_dir, client_suffix, ds_suffix, file_struct) {
+            if let Ok(_) = write_lua_file(mod_dir, client_suffix, ds_suffix, file_struct) {}
+        }
 
+        // GameLua.Mod.SocialIsland.GamePlay.Config.PBRouteConfig
+        write_lua_route_config_file(mod_dir, &vec).expect("write route config failed");
+    }
+}
+
+fn write_lua_route_config_file(
+    mod_dir: &str,
+    file_struct_vec: &Vec<FileStruct>,
+) -> std::io::Result<()> {
+    if file_struct_vec.len() == 0 {
+        return Ok(());
+    }
+    let mod_name = file_struct_vec.first().unwrap().game_mod.as_str();
+    let filepath = Path::new(mod_dir)
+        .join(mod_name)
+        .join("GamePlay")
+        .join("Config")
+        .join("PBRouteConfig.lua");
+    let dir = filepath.parent().unwrap();
+    if false == dir.exists() {
+        fs::create_dir_all(dir).expect("create failed");
+    }
+    if filepath.exists() {
+        fs::remove_file(&filepath)?;
+    }
+
+    // 此文件每次删除重写
+    if let Ok(mut file) = File::create(&filepath) {
+        write!(
+            file,
+            "{}",
+            format!("\n--- 各个Mod PB协议路由定义配置文件，此文件乃自动生成，请勿手动修改\n")
+        )?;
+        write!(file, "{}", format!("--- samizheng\n\n\n"))?;
+
+        // client
+        write!(file, "{}", format!("--1.PB协议：客户端响应DS的协议表\n"))?;
+        write!(file, "{}", format!("local PBRouteConfig_Client =\n{{\n"))?;
+        for item in file_struct_vec {
+            write!(file, "{}", format!("\t{} =\n\t{{\n", item.file_name))?;
+            write!(
+                file,
+                "{}",
+                format!(
+                    "\t\tmoduleName = \"GameLua.Mod.{}.Client.Handler.{}_{}_Client_Handler\",\n",
+                    mod_name, mod_name, item.file_name
+                )
+            )?;
+            // pbFileName = "SocialIsland/Alias.pb",
+            write!(
+                file,
+                "{}",
+                format!("\t\tpbFileName = \"{}/{}.pb\",\n", mod_name, item.file_name)
+            )?;
+            write!(file, "{}", format!("\t\troutes =\n\t\t{{\n"))?;
+            // aaa_rsp = "on_rsp"
+            for msg in &item.message_array {
+                if msg.message_type == MessageType::Req {
+                    write!(
+                        file,
+                        "{}",
+                        format!("\t\t\t{} = true,\n", msg.message_name_full)
+                    )?;
+                } else if msg.message_type == MessageType::Rsp
+                    || msg.message_type == MessageType::Notify
+                {
+                    write!(
+                        file,
+                        "{}",
+                        format!(
+                            "\t\t\t{} = \"on_{}\",\n",
+                            msg.message_name_full, msg.message_name_full
+                        )
+                    )?;
+                }
             }
+            write!(file, "{}", format!("\t\t}},\n"))?;
+            write!(file, "{}", format!("\t}},\n"))?;
         }
-    }
-}
+        write!(file, "{}", format!("}}\n\n"))?;
 
-enum State {
-    Normal,
-    MessageDefine,
-    MessageScopeBegin,
-}
-
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
-enum MessageType {
-    Struct,
-    Req,
-    Rsp,
-    Notify,
-}
-
-#[derive(Debug)]
-struct FileStruct {
-    message_array: Vec<Message>,
-    game_mod: String,
-    file_name: String,
-}
-
-impl FileStruct {
-    pub fn new() -> FileStruct {
-        FileStruct {
-            message_array: vec![],
-            game_mod: "".to_string(),
-            file_name: "".to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
-struct Message {
-    message_type: MessageType,
-    message_name_full: String,
-    message_name_no_suffix: String,
-    field_array: Vec<Field>,
-    comment: String,
-    res_message: Option<*const Message>,
-}
-
-impl Message {
-    pub fn new() -> Message {
-        Message {
-            message_type: MessageType::Req,
-            message_name_full: "".to_string(),
-            message_name_no_suffix: "".to_string(),
-            field_array: vec![],
-            comment: "".to_string(),
-            res_message: None,
-        }
-    }
-}
-
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
-struct Field {
-    is_array: bool,
-    field_type: String,
-    field_name: String,
-    comment: String,
-}
-
-impl Field {
-    fn new() -> Field {
-        Field {
-            is_array: false,
-            field_name: "".to_string(),
-            field_type: "".to_string(),
-            comment: "".to_string(),
-        }
-    }
-
-    fn get_type_string(&self) -> String {
-        if self.is_array {
-            format!("{}[]", self.field_type)
-        } else {
-            // self.field_type.to_owned()
-            match self.field_type.as_str() {
-                "int32" => "number".to_string(),
-                "int64" => "number".to_string(),
-                "string" => "".to_string(),
-                "float" => "number".to_string(),
-                _ => self.field_type.to_owned(),
+        // ds
+        write!(file, "{}", format!("--2.PB协议：DS响应客户端的协议表\n"))?;
+        write!(file, "{}", format!("local PBRouteConfig_DS =\n{{\n"))?;
+        for item in file_struct_vec {
+            write!(file, "{}", format!("\t{} =\n\t{{\n", item.file_name))?;
+            write!(
+                file,
+                "{}",
+                format!(
+                    "\t\tmoduleName = \"GameLua.Mod.{}.DS.Handler.{}_{}_DS_Handler\",\n",
+                    mod_name, mod_name, item.file_name
+                )
+            )?;
+            // pbFileName = "SocialIsland/Alias.pb",
+            write!(
+                file,
+                "{}",
+                format!("\t\tpbFileName = \"{}/{}.pb\",\n", mod_name, item.file_name)
+            )?;
+            write!(file, "{}", format!("\t\troutes =\n\t\t{{\n"))?;
+            // aaa_rsp = "on_rsp"
+            for msg in &item.message_array {
+                if msg.message_type == MessageType::Req {
+                    write!(
+                        file,
+                        "{}",
+                        format!(
+                            "\t\t\t{} = \"on_{}\",\n",
+                            msg.message_name_full, msg.message_name_full
+                        )
+                    )?;
+                } else if msg.message_type == MessageType::Rsp
+                    || msg.message_type == MessageType::Notify
+                {
+                    write!(
+                        file,
+                        "{}",
+                        format!("\t\t\t{} = true,\n", msg.message_name_full)
+                    )?;
+                }
             }
+            write!(file, "{}", format!("\t\t}},\n"))?;
+            write!(file, "{}", format!("\t}},\n"))?;
         }
+        write!(file, "{}", format!("}}\n\n\n"))?;
+
+        //end
+        write!(file, "{}", format!("if Client then\n"))?;
+        write!(file, "{}", format!("\treturn PBRouteConfig_Client\n"))?;
+        write!(file, "{}", format!("else\n"))?;
+        write!(file, "{}", format!("\treturn PBRouteConfig_DS\n"))?;
+        write!(file, "{}", format!("end\n"))?;
     }
 
-    fn get_default_value(&self) -> &str {
-        if self.is_array {
-            "{}"
-        } else {
-            match self.field_type.as_str() {
-                "int32" => "0",
-                "int64" => "0",
-                "string" => "",
-                "float" => "0",
-                _ => "nil",
-            }
-        }
-    }
+    // file_struct_vec.into_iter().
+
+    Ok(())
 }
 
 fn parse_dir(dir: &Path) -> std::io::Result<Vec<FileStruct>> {
@@ -162,7 +210,7 @@ fn parse_file(filepath: &Path) -> std::io::Result<FileStruct> {
     let re_left_brace = Regex::new("^[ \t]*(\\{)").unwrap();
     let re_right_brace = Regex::new("^[ \t]*(})").unwrap();
     let re_comment = Regex::new("^[ \t]*//(.*)[\r|\n]+").unwrap();
-    let re_package = Regex::new("^[ \t]*package[ \t]*ds_client\\.([a-zA-Z_]\\w*)").unwrap();
+    // let re_package = Regex::new("^[ \t]*package[ \t]*ds_client\\.([a-zA-Z_]\\w*)").unwrap();
     // 1 repeated
     // 2 type
     // 3 name
@@ -174,6 +222,14 @@ fn parse_file(filepath: &Path) -> std::io::Result<FileStruct> {
     // 2.FileStruct
     let mut file_struct: FileStruct = FileStruct::new();
     file_struct.file_name = filepath.file_stem().unwrap().to_str().unwrap().to_string();
+    file_struct.game_mod = filepath
+        .parent()
+        .unwrap()
+        .file_stem()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
 
     let mut state = State::Normal;
 
@@ -192,9 +248,9 @@ fn parse_file(filepath: &Path) -> std::io::Result<FileStruct> {
         if re_comment.is_match(line) {
             comment = re_comment.captures(line).unwrap()[1].to_string();
         }
-        if re_package.is_match(line) {
-            file_struct.game_mod = re_package.captures(line).unwrap()[1].to_string();
-        }
+        // if re_package.is_match(line) {
+        //     file_struct.game_mod = re_package.captures(line).unwrap()[1].to_string();
+        // }
 
         match state {
             State::Normal => {
@@ -318,19 +374,19 @@ fn write_lua_file(
     file_struct: &FileStruct,
 ) -> std::io::Result<()> {
     // 4.将结果写入文件
-    let mut c2d_list: Vec<&Message> = file_struct
+    let c2d_list: Vec<&Message> = file_struct
         .message_array
         .iter()
         .filter(|x1| x1.message_type == MessageType::Req)
         .collect();
 
-    let mut d2c_list: Vec<&Message> = file_struct
+    let d2c_list: Vec<&Message> = file_struct
         .message_array
         .iter()
         .filter(|x1| x1.message_type == MessageType::Rsp || x1.message_type == MessageType::Notify)
         .collect();
 
-    let mut struct_list: Vec<&Message> = file_struct
+    let struct_list: Vec<&Message> = file_struct
         .message_array
         .iter()
         .filter(|x1| x1.message_type == MessageType::Struct)
@@ -354,18 +410,21 @@ fn write_lua_file(
             file_struct.game_mod, file_struct.file_name, client_suffix
         ));
 
+    // &mut c2d_list 这些容器传进去，有可能被移除其中的元素（找到存在的会剔除）。然后在下面依然用到了，会被改变的。所以这里类型应该就是原始vector。
     create_or_update_file(
-        &mut c2d_list,
-        &mut d2c_list,
-        &mut struct_list,
+        Vec::from_iter(c2d_list.iter()),
+        Vec::from_iter(d2c_list.iter()),
+        Vec::from_iter(struct_list.iter()),
         &ds_file,
         file_struct,
         true,
     )?;
+
+    // 需要注意的是  client file 的req rsp调换了顺序
     create_or_update_file(
-        &mut d2c_list,
-        &mut c2d_list,
-        &mut struct_list,
+        Vec::from_iter(d2c_list.iter()),
+        Vec::from_iter(c2d_list.iter()),
+        Vec::from_iter(struct_list.iter()),
         &client_file,
         file_struct,
         false,
@@ -376,9 +435,9 @@ fn write_lua_file(
 
 /// 创建或更新文件
 fn create_or_update_file(
-    on_msg_list: &mut Vec<&Message>,
-    send_msg_list: &mut Vec<&Message>,
-    struct_msg_list: &mut Vec<&Message>,
+    mut on_msg_list: Vec<&&Message>,
+    mut send_msg_list: Vec<&&Message>,
+    mut struct_msg_list: Vec<&&Message>,
     path: &PathBuf,
     file_struct: &FileStruct,
     is_ds: bool,
@@ -391,8 +450,6 @@ fn create_or_update_file(
     let table_name = path.file_stem().unwrap().to_str().unwrap();
     // file gen
     if let Ok(file) = File::open(path) {
-        println!("----open file {}----", path.as_path().to_str().unwrap());
-
         // 读文件，如果未找到函数，或者函数签名不一致，则新增函数
         let mut buf_reader = BufReader::new(file);
 
@@ -452,13 +509,13 @@ fn create_or_update_file(
         loop {
             let line = &mut String::new();
             let read_len = buf_reader.read_line(line);
-            let last_pos  = pos;
+            let last_pos = pos;
             pos = buf_reader.stream_position()?;
             if read_len.unwrap() == 0 {
                 break;
             }
 
-            let lamda = |re_list: &mut Vec<Regex>, msg_list: &mut Vec<&Message>| {
+            let lamda = |re_list: &mut Vec<Regex>, mut msg_list: &mut Vec<&&Message>| {
                 for i in (0..re_list.len()).rev() {
                     if re_list[i].is_match(line) {
                         // println!("exist func in {}", line);
@@ -468,9 +525,9 @@ fn create_or_update_file(
                     }
                 }
             };
-            lamda(&mut re_list_on, on_msg_list);
-            lamda(&mut re_list_send, send_msg_list);
-            lamda(&mut re_list_struct, struct_msg_list);
+            lamda(&mut re_list_on, &mut on_msg_list);
+            lamda(&mut re_list_send, &mut send_msg_list);
+            lamda(&mut re_list_struct, &mut struct_msg_list);
 
             // 找到return开始的地方，插入代码的地方
             if line.starts_with(format!("return {}", table_name).as_str()) {
@@ -481,6 +538,7 @@ fn create_or_update_file(
         if on_msg_list.len() > 0 || send_msg_list.len() > 0 || struct_msg_list.len() > 0 {
             // 还剩下需要append的，加到后面
             let mut file = OpenOptions::new().write(true).open(path.as_path())?;
+            println!("----update file {}----", path.as_path().to_str().unwrap());
 
             // 文件清空内容重新构造
             if append_pos == 0 {
@@ -499,9 +557,9 @@ fn create_or_update_file(
 
             // functions
             insert_function_code(
-                &on_msg_list,
-                &send_msg_list,
-                &struct_msg_list,
+                on_msg_list,
+                send_msg_list,
+                struct_msg_list,
                 &mut file,
                 table_name,
                 file_struct,
@@ -517,13 +575,17 @@ fn create_or_update_file(
 
             // table define
             write!(file, "{}", format!("local {} = {{\t}}\n", table_name))?;
-            write!(file, "{}", format!("local ds_net = require(\"ds_net\")\n\n"))?;
+            write!(
+                file,
+                "{}",
+                format!("local ds_net = require(\"ds_net\")\n\n")
+            )?;
 
             // functions
             insert_function_code(
-                &on_msg_list,
-                &send_msg_list,
-                &struct_msg_list,
+                on_msg_list,
+                send_msg_list,
+                struct_msg_list,
                 &mut file,
                 table_name,
                 file_struct,
@@ -540,9 +602,9 @@ fn create_or_update_file(
 
 /// 插入函数代码
 fn insert_function_code(
-    on_msg_list: &Vec<&Message>,
-    send_msg_list: &Vec<&Message>,
-    struct_msg_list: &Vec<&Message>,
+    on_msg_list: Vec<&&Message>,
+    send_msg_list: Vec<&&Message>,
+    struct_msg_list: Vec<&&Message>,
     file: &mut File,
     table_name: &str,
     file_struct: &FileStruct,
@@ -808,4 +870,106 @@ fn insert_function_code(
     }
 
     Ok(())
+}
+
+enum State {
+    Normal,
+    MessageDefine,
+    MessageScopeBegin,
+}
+
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
+enum MessageType {
+    Struct,
+    Req,
+    Rsp,
+    Notify,
+}
+
+#[derive(Debug)]
+struct FileStruct {
+    message_array: Vec<Message>,
+    game_mod: String,
+    file_name: String,
+}
+
+impl FileStruct {
+    pub fn new() -> FileStruct {
+        FileStruct {
+            message_array: vec![],
+            game_mod: "".to_string(),
+            file_name: "".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
+struct Message {
+    message_type: MessageType,
+    message_name_full: String,
+    message_name_no_suffix: String,
+    field_array: Vec<Field>,
+    comment: String,
+    res_message: Option<*const Message>,
+}
+
+impl Message {
+    pub fn new() -> Message {
+        Message {
+            message_type: MessageType::Req,
+            message_name_full: "".to_string(),
+            message_name_no_suffix: "".to_string(),
+            field_array: vec![],
+            comment: "".to_string(),
+            res_message: None,
+        }
+    }
+}
+
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
+struct Field {
+    is_array: bool,
+    field_type: String,
+    field_name: String,
+    comment: String,
+}
+
+impl Field {
+    fn new() -> Field {
+        Field {
+            is_array: false,
+            field_name: "".to_string(),
+            field_type: "".to_string(),
+            comment: "".to_string(),
+        }
+    }
+
+    fn get_type_string(&self) -> String {
+        if self.is_array {
+            format!("{}[]", self.field_type)
+        } else {
+            // self.field_type.to_owned()
+            match self.field_type.as_str() {
+                "int32" => "number".to_string(),
+                "int64" => "number".to_string(),
+                "string" => "".to_string(),
+                "float" => "number".to_string(),
+                _ => self.field_type.to_owned(),
+            }
+        }
+    }
+
+    fn get_default_value(&self) -> &str {
+        if self.is_array {
+            "{}"
+        } else {
+            match self.field_type.as_str() {
+                "int32" => "0",
+                "int64" => "0",
+                "string" => "\"\"",
+                "float" => "0",
+                _ => "nil",
+            }
+        }
+    }
 }
