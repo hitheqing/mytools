@@ -4,16 +4,12 @@ use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::BufReader;
 use std::io::prelude::*;
-use std::ops::Add;
 use std::os::windows::fs::FileExt;
 use std::path::{Path, PathBuf};
 
 use regex::Regex;
 
-static mut COMMAND_LINE_OP: CommandLineOp = CommandLineOp {
-    dir: String::new(),
-    show_func_write: false,
-};
+static mut COMMAND_LINE_OP: CommandLineOp = CommandLineOp { show_func_write: false };
 
 // 第一个程序：读文件、正则匹配、文件结构parse、写文件
 
@@ -125,11 +121,14 @@ fn write_lua_route_config_file(mod_dir: &Path, file_struct_vec: &Vec<FileStruct>
         write!(file, "{}", format!("}}\n\n\n"))?;
 
         //end
-        write!(file, "{}", format!("if Client then\n"))?;
-        write!(file, "{}", format!("\treturn PBRouteConfig_Client\n"))?;
-        write!(file, "{}", format!("else\n"))?;
-        write!(file, "{}", format!("\treturn PBRouteConfig_DS\n"))?;
-        write!(file, "{}", format!("end\n"))?;
+        let s = b"
+if Client then
+	return PBRouteConfig_Client
+else
+	return PBRouteConfig_DS
+end
+";
+        file.write(s)?;
     }
 
     Ok(())
@@ -304,93 +303,35 @@ fn parse_file(filepath: &Path) -> std::io::Result<FileStruct> {
 /// 写入lua文件
 fn write_lua_file(mod_dir: &Path, client_suffix: &str, ds_suffix: &str, file_struct: &FileStruct) -> std::io::Result<()> {
     // 4.将结果写入文件
-
-    let c2d_list: Vec<&Message> = file_struct.messages.iter().filter(|x1| x1.msg_type == MessageType::Req).collect();
-
-    let d2c_list: Vec<&Message> = file_struct
-        .messages
-        .iter()
-        .filter(|x1| x1.msg_type == MessageType::Rsp || x1.msg_type == MessageType::Notify)
-        .collect();
-
-    let struct_list: Vec<&Message> = file_struct.messages.iter().filter(|x1| x1.msg_type == MessageType::Struct).collect();
-
     let mod_name = file_struct.mod_name.as_str();
     let ds_file_name = format!("{}_{}{}.lua", file_struct.mod_name, file_struct.file_name, ds_suffix);
     let ds_path = mod_dir.join(mod_name).join("DS").join("Handler").join(ds_file_name);
     let client_file_name = format!("{}_{}{}.lua", file_struct.mod_name, file_struct.file_name, client_suffix);
     let client_path = mod_dir.join(mod_name).join("Client").join("Handler").join(client_file_name);
 
-    // &mut c2d_list 这些容器传进去，有可能被移除其中的元素（找到存在的会剔除）。然后在下面依然用到了，会被改变的。所以这里类型应该就是原始vector。
-    create_or_update_file(
-        Vec::from_iter(c2d_list.iter()),
-        Vec::from_iter(d2c_list.iter()),
-        Vec::from_iter(struct_list.iter()),
-        &ds_path,
-        file_struct,
-        true,
-    )?;
-
-    // 需要注意的是  client file 的req rsp调换了顺序
-    create_or_update_file(
-        Vec::from_iter(d2c_list.iter()),
-        Vec::from_iter(c2d_list.iter()),
-        Vec::from_iter(struct_list.iter()),
-        &client_path,
-        file_struct,
-        false,
-    )?;
+    create_or_update_file(&ds_path, file_struct, true)?;
+    create_or_update_file(&client_path, file_struct, false)?;
 
     Ok(())
 }
 
 /// 创建或更新文件
-fn create_or_update_file(
-    mut on_msg_list: Vec<&&Message>,
-    mut send_msg_list: Vec<&&Message>,
-    mut struct_msg_list: Vec<&&Message>,
-    path: &PathBuf,
-    file_struct: &FileStruct,
-    is_ds: bool,
-) -> std::io::Result<()> {
+fn create_or_update_file(path: &PathBuf, file_struct: &FileStruct, is_ds: bool) -> std::io::Result<()> {
     let dir = path.parent().unwrap();
     if false == dir.exists() {
         fs::create_dir_all(dir).expect("create failed");
     }
 
     let table_name = path.file_stem().unwrap().to_str().unwrap();
+    // copy vector
+    let mut remain_messages = Vec::from_iter(file_struct.messages.iter());
+
     // file gen
     if let Ok(file) = File::open(path) {
         // 读文件，如果未找到函数，或者函数签名不一致，则新增函数
         let mut buf_reader = BufReader::new(file);
 
-        // 1.构造正则 on_xx send_xx struct
-        let mut re_list_on: Vec<Regex> = vec![];
-        for message in on_msg_list.iter() {
-            if is_ds {
-                let res = format!("^[ \t]*function[ \t]*{}\\.on_{}\\(playerUid, message\\)", table_name, message.msg_name_full);
-                re_list_on.push(Regex::new(res.as_str()).unwrap());
-            } else {
-                let res = format!("^[ \t]*function[ \t]*{}\\.on_{}\\(message\\)", table_name, message.msg_name_full);
-                re_list_on.push(Regex::new(res.as_str()).unwrap());
-            }
-        }
-
-        let mut re_list_send: Vec<Regex> = vec![];
-        for message in send_msg_list.iter() {
-            let params = message.get_params_str_in_func(is_ds, false);
-            let res = format!("^[ \t]*function[ \t]*{}\\.send_{}\\({}\\)", table_name, message.msg_name_full, params);
-            re_list_send.push(Regex::new(res.as_str()).unwrap());
-        }
-
-        let mut re_list_struct: Vec<Regex> = vec![];
-        for message in struct_msg_list.iter() {
-            let res = format!("^[ \t]*local[ \t]*{}", message.msg_name_full);
-            re_list_struct.push(Regex::new(res.as_str()).unwrap());
-        }
-
         // 2.遍历文件，剔除已经有了的结构。记录文件结尾的位置
-
         let mut pos = 0;
         let mut append_pos = 0;
         loop {
@@ -402,19 +343,13 @@ fn create_or_update_file(
                 break;
             }
 
-            let lambda = |re_list: &mut Vec<Regex>, msg_list: &mut Vec<&&Message>| {
-                for i in (0..re_list.len()).rev() {
-                    if re_list[i].is_match(line) {
-                        // println!("exist func in {}", line);
-                        re_list.remove(i);
-                        msg_list.remove(i);
-                        break;
-                    }
+            for i in (0..remain_messages.len()).rev() {
+                let message = remain_messages[i];
+                let re = message.make_func_regex(is_ds, table_name);
+                if re.is_match(line) {
+                    remain_messages.remove(i);
                 }
-            };
-            lambda(&mut re_list_on, &mut on_msg_list);
-            lambda(&mut re_list_send, &mut send_msg_list);
-            lambda(&mut re_list_struct, &mut struct_msg_list);
+            }
 
             // 找到return开始的地方，插入代码的地方
             if line.starts_with(format!("return {}", table_name).as_str()) {
@@ -422,7 +357,7 @@ fn create_or_update_file(
             }
         }
 
-        if on_msg_list.len() > 0 || send_msg_list.len() > 0 || struct_msg_list.len() > 0 {
+        if remain_messages.len() > 0 {
             // 还剩下需要append的，加到后面
             let mut file = OpenOptions::new().write(true).open(path.as_path())?;
             println!("----update file {}----", path.as_path().to_str().unwrap());
@@ -439,9 +374,11 @@ fn create_or_update_file(
             }
 
             // functions
-            insert_function_code(on_msg_list, send_msg_list, struct_msg_list, &mut file, table_name, file_struct, is_ds)?;
+            insert_function_code(remain_messages, &mut file, table_name, file_struct, is_ds)?;
             // return
             write!(file, "{}", format!("return {}\n", table_name))?;
+        }else {
+            // println!("----keep file {}----", path.as_path().to_str().unwrap());
         }
     } else {
         if let Ok(mut file) = File::create(path.as_path()) {
@@ -453,7 +390,7 @@ fn create_or_update_file(
             write!(file, "{}", format!("local ds_net = require(\"ds_net\")\n\n"))?;
 
             // functions
-            insert_function_code(on_msg_list, send_msg_list, struct_msg_list, &mut file, table_name, file_struct, is_ds)?;
+            insert_function_code(remain_messages, &mut file, table_name, file_struct, is_ds)?;
 
             // return
             write!(file, "{}", format!("return {}\n", table_name))?;
@@ -464,138 +401,120 @@ fn create_or_update_file(
 }
 
 /// 插入函数代码
-fn insert_function_code(
-    on_msg_list: Vec<&&Message>,
-    send_msg_list: Vec<&&Message>,
-    struct_msg_list: Vec<&&Message>,
-    file: &mut File,
-    table_name: &str,
-    file_struct: &FileStruct,
-    is_ds: bool,
-) -> std::io::Result<()> {
-    // structs class hint
-    for message in struct_msg_list {
+fn insert_function_code(remain_messages: Vec<&Message>, file: &mut File, table_name: &str, file_struct: &FileStruct, is_ds: bool) -> std::io::Result<()> {
+    for message in remain_messages {
         unsafe {
             if COMMAND_LINE_OP.show_func_write {
                 println!("--func:{}", message.msg_name_full);
             }
         }
-
-        // class define
-        write!(file, "{}", message.gen_class_doc_comment(""))?;
-        write!(file, "{}", message.gen_table_string("--"))?;
-    }
-
-    // on functions
-    for message in on_msg_list {
-        unsafe {
-            if COMMAND_LINE_OP.show_func_write {
-                println!("--func:{}", message.msg_name_full);
+        if MessageType::Struct == message.msg_type {
+            // class define
+            write!(file, "{}", message.gen_class_doc_comment(""))?;
+            write!(file, "{}", message.gen_table_string("--"))?;
+        } else if MessageType::Req == message.msg_type {
+            // function doc
+            write!(file, "{}", message.gen_func_doc_comment(""))?;
+            // function define
+            write!(file, "{}", message.gen_func_string(is_ds, table_name))?;
+            // print
+            if is_ds {
+                if message.fields.len() > 0 {
+                    let s = format!(
+                        "\tprint(bWriteLog and string.format(\"{}.on_{} {}\"{}))\n",
+                        table_name,
+                        message.msg_name_full,
+                        message.get_print_params_format_str(is_ds),
+                        message.get_params_str_in_func_with_message(is_ds, true)
+                    );
+                    write!(file, "{}", s)?;
+                } else {
+                    let s = format!(
+                        "\tprint(bWriteLog and string.format(\"{}.{} playerUid:%s\",playerUid))\n",
+                        table_name, message.msg_name_full
+                    );
+                    write!(file, "{}", s)?;
+                }
+            } else {
+                if message.fields.len() > 0 {
+                    let s = format!(
+                        "\tprint(bWriteLog and string.format(\"{}.send_{} {}\"{}))\n",
+                        table_name,
+                        message.msg_name_full,
+                        message.get_print_params_format_str(is_ds),
+                        message.get_params_str_in_func_with_message(is_ds, false)
+                    );
+                    write!(file, "{}", s)?;
+                } else {
+                    let s = format!("\tprint(bWriteLog and string.format(\"{}.{} \"))\n", table_name, message.msg_name_full);
+                    write!(file, "{}", s)?;
+                }
             }
-        }
-        write!(file, "{}", message.gen_func_doc_comment(""))?;
+            // rsp ds only
+            if is_ds {
+                if let Some(ptr) = message.p_target {
+                    for target_message in &file_struct.messages {
+                        unsafe {
+                            if target_message.msg_name_full == (*ptr).msg_name_full {
+                                // println!("--find rsp:{} for req:{}", target_message.msg_name_full, message.msg_name_full);
+                                for x in &target_message.fields {
+                                    write!(file, "{}", format!("\tlocal {} = {}\n", x.field_name, x.get_default_value()))?;
+                                }
 
-        // function
-        if is_ds {
-            let s = format!("function {}.on_{}(playerUid, message)\n", table_name, message.msg_name_full);
-            write!(file, "{}", s)?;
-        } else {
-            write!(file, "{}", format!("function {}.on_{}(message)\n", table_name, message.msg_name_full))?;
-        }
-
-        // print
-        if message.fields.len() > 0 {
-            let s = format!(
-                "\tprint(bWriteLog and string.format(\"{}.on_{} {}\"{}))\n",
-                table_name,
-                message.msg_name_full,
-                message.get_print_params_format_str(is_ds),
-                message.get_params_str_in_func_with_message(is_ds)
-            );
-            write!(file, "{}", s)?;
-        } else {
-            let s = format!("\tprint(bWriteLog and string.format(\"{}.{} \"))\n", table_name, message.msg_name_full);
-            write!(file, "{}", s)?;
-        }
-
-        // rsp
-        if let Some(ptr) = message.p_target {
-            for target_message in &file_struct.messages {
-                unsafe {
-                    if target_message.msg_name_full == (*ptr).msg_name_full {
-                        // println!("--find rsp:{} for req:{}", target_message.msg_name_full, message.msg_name_full);
-                        for x in &target_message.fields {
-                            write!(file, "{}", format!("\tlocal {} = {}\n", x.field_name, x.get_default_value()))?;
+                                let s = format!(
+                                    "\t{}.send_{}({})\n",
+                                    table_name,
+                                    target_message.msg_name_full,
+                                    target_message.get_params_str_in_func(true, false)
+                                );
+                                write!(file, "{}", s)?;
+                                break;
+                            }
                         }
-
-                        let s = format!(
-                            "\t{}.send_{}({})\n",
-                            table_name,
-                            target_message.msg_name_full,
-                            target_message.get_params_str_in_func(true, false)
-                        );
-                        write!(file, "{}", s)?;
-                        break;
                     }
                 }
             }
-        }
 
-        // end
-        write!(file, "{}", format!("end\n\n"))?;
-    }
-
-    // send functions
-    for message in send_msg_list {
-        unsafe {
-            if COMMAND_LINE_OP.show_func_write {
-                println!("--func:{}", message.msg_name_full);
+            // end
+            write!(file, "{}", format!("end\n\n"))?;
+        } else if MessageType::Rsp == message.msg_type || MessageType::Notify == message.msg_type {
+            // function doc
+            write!(file, "{}", message.gen_func_doc_comment(""))?;
+            // function define
+            write!(file, "{}", message.gen_func_string(is_ds, table_name))?;
+            // print
+            if is_ds {
+                if message.fields.len() > 0 {
+                    let s = format!(
+                        "\tprint(bWriteLog and string.format(\"{}.send_{} {}\"{}))\n",
+                        table_name,
+                        message.msg_name_full,
+                        message.get_print_params_format_str(is_ds),
+                        message.get_params_str_in_func_with_message(is_ds, false)
+                    );
+                    write!(file, "{}", s)?;
+                } else {
+                    let s = format!("\tprint(bWriteLog and string.format(\"{}.{} \"))\n", table_name, message.msg_name_full);
+                    write!(file, "{}", s)?;
+                }
+            } else {
+                if message.fields.len() > 0 {
+                    let s = format!(
+                        "\tprint(bWriteLog and string.format(\"{}.on_{} {}\"{}))\n",
+                        table_name,
+                        message.msg_name_full,
+                        message.get_print_params_format_str(is_ds),
+                        message.get_params_str_in_func_with_message(is_ds, true)
+                    );
+                    write!(file, "{}", s)?;
+                } else {
+                    let s = format!("\tprint(bWriteLog and string.format(\"{}.{} \"))\n", table_name, message.msg_name_full);
+                    write!(file, "{}", s)?;
+                }
             }
+            // end
+            write!(file, "{}", format!("end\n\n"))?;
         }
-        write!(file, "{}", message.gen_func_doc_comment(""))?;
-
-        // function
-        let params = message.get_params_str_in_func(is_ds, false);
-        let s = format!("function {}.send_{}({})\n", table_name, message.msg_name_full, params);
-        write!(file, "{}", s)?;
-
-        // print
-        if message.fields.len() > 0 {
-            let s1 = message.get_print_params_format_str(is_ds);
-            let s2 = message.get_params_str_in_func(is_ds, true);
-            let s = format!(
-                "\tprint(bWriteLog and string.format(\"{}.send_{} {}\"{}))\n",
-                table_name, message.msg_name_full, s1, s2
-            );
-            write!(file, "{}", s)?;
-        } else {
-            let s = format!("\tprint(bWriteLog and string.format(\"{}.send_{} \"))\n", table_name, message.msg_name_full);
-            write!(file, "{}", s)?;
-        }
-
-        // content
-        write!(file, "{}", format!("\tlocal res_param = {{\n"))?;
-        // params
-        let s: Vec<String> = message
-            .fields
-            .iter()
-            .map(|x1| format!("\t\t{} = {},\n", x1.field_name, x1.field_name))
-            .collect();
-        let params = s.join("");
-        write!(file, "{}", format!("{}", params))?;
-        write!(file, "{}", format!("\t}}\n"))?;
-
-        if is_ds {
-            let s = format!(
-                "\tds_net.SendMessage(\"{}.{}\", res_param, playerUid)\n",
-                file_struct.mod_name, message.msg_name_full
-            );
-            write!(file, "{}", s)?;
-        } else {
-            let s = format!("\tds_net.SendMessage(\"{}.{}\", res_param)\n", file_struct.mod_name, message.msg_name_full);
-            write!(file, "{}", s)?;
-        }
-        write!(file, "{}", format!("end\n\n"))?;
     }
 
     Ok(())
@@ -642,8 +561,6 @@ struct Message {
     p_target: Option<*const Message>,
 }
 
-impl Message {}
-
 impl Message {
     pub fn new() -> Message {
         Message {
@@ -656,6 +573,7 @@ impl Message {
         }
     }
 
+    // is_need_prefix print中才传true
     pub fn get_params_str_in_func(&self, is_ds: bool, is_need_prefix: bool) -> String {
         // params
         let field_names: Vec<String> = self.fields.iter().map(|x| x.field_name.to_string()).collect();
@@ -677,29 +595,40 @@ impl Message {
         params
     }
 
-    pub fn get_params_str_in_func_with_message(&self, is_ds: bool) -> String {
+    pub fn get_params_str_in_func_with_message(&self, need_player_uid: bool, need_message: bool) -> String {
         // params
         let field_names: Vec<String> = self.fields.iter().map(|x| x.field_name.to_string()).collect();
-        let mut params = field_names.join(", message.");
+        let mut params;
+        if need_message {
+            params = field_names.join(", message.");
+        } else {
+            params = field_names.join(", ");
+        }
+
         if field_names.len() > 0 {
-            params = format!(", message.{}", params);
-            if is_ds {
-                params = format!(", playerUid{}", params);
+            if need_message && !need_player_uid {
+                params = format!(", message.{}", params);
+            } else if !need_message && need_player_uid {
+                params = format!(", playerUid, {}", params);
+            } else if need_message && need_player_uid {
+                params = format!(", playerUid, message.{}", params);
+            } else {
+                params = format!(", {}", params);
             }
         } else {
             params = "".to_string();
-            if is_ds {
+            if need_player_uid {
                 params = ", playerUid".to_string();
             }
         }
         params
     }
 
-    pub(crate) fn get_print_params_format_str(&self, is_ds: bool) -> String {
+    pub(crate) fn get_print_params_format_str(&self, need_player_uid: bool) -> String {
         // params
         let s: Vec<String> = self.fields.iter().map(|x| x.field_name.to_string()).collect();
         let mut params_1 = s.join(":%s, ").as_str().to_owned() + ":%s";
-        if is_ds {
+        if need_player_uid {
             params_1 = format!("playerUid:%s, {}", params_1);
         }
         params_1
@@ -742,6 +671,81 @@ impl Message {
         let s = format!("}}\n\n");
         ret.push_str(format!("{}{}", prefix, s).as_str());
         ret
+    }
+
+    pub fn gen_func_string(&self, is_ds: bool, table_name: &str) -> String {
+        let mut s: String = String::new();
+        let params = self.get_params_str_in_func(is_ds, false);
+        match self.msg_type {
+            MessageType::Struct => {
+                "".to_string();
+            }
+            MessageType::Req => {
+                if is_ds {
+                    let ts = format!("function {}.on_{}(playerUid, message)\n", table_name, self.msg_name_full);
+                    s.push_str(ts.as_str());
+                } else {
+                    let ts = format!("function {}.send_{}({})\n", table_name, self.msg_name_full, params);
+                    s.push_str(ts.as_str());
+                }
+            }
+            MessageType::Rsp => {
+                if is_ds {
+                    let ts = format!("function {}.send_{}({})\n", table_name, self.msg_name_full, params);
+                    s.push_str(ts.as_str());
+                } else {
+                    let ts = format!("function {}.on_{}(message)\n", table_name, self.msg_name_full);
+                    s.push_str(ts.as_str());
+                }
+            }
+            MessageType::Notify => {
+                if is_ds {
+                    let ts = format!("function {}.send_{}({})\n", table_name, self.msg_name_full, params);
+                    s.push_str(ts.as_str());
+                } else {
+                    let ts = format!("function {}.on_{}(message)\n", table_name, self.msg_name_full);
+                    s.push_str(ts.as_str());
+                }
+            }
+        }
+        s
+    }
+
+    pub fn make_func_regex(&self, is_ds: bool, table_name: &str) -> Regex {
+        let params = self.get_params_str_in_func(is_ds, false);
+        match self.msg_type {
+            MessageType::Struct => {
+                let re = format!("^[ \t]*---@class[ \t]*{}", self.msg_name_full);
+                Regex::new(re.as_str()).unwrap()
+            }
+            MessageType::Req => {
+                if is_ds {
+                    let re = format!("^[ \t]*function[ \t]*{}\\.on_{}\\(playerUid, message\\)", table_name, self.msg_name_full);
+                    Regex::new(re.as_str()).unwrap()
+                } else {
+                    let re = format!("^[ \t]*function[ \t]*{}\\.send_{}\\({}\\)", table_name, self.msg_name_full, params);
+                    Regex::new(re.as_str()).unwrap()
+                }
+            }
+            MessageType::Rsp => {
+                if is_ds {
+                    let re = format!("^[ \t]*function[ \t]*{}\\.send_{}\\({}\\)", table_name, self.msg_name_full, params);
+                    Regex::new(re.as_str()).unwrap()
+                } else {
+                    let re = format!("^[ \t]*function[ \t]*{}\\.on_{}\\(message\\)", table_name, self.msg_name_full);
+                    Regex::new(re.as_str()).unwrap()
+                }
+            }
+            MessageType::Notify => {
+                if is_ds {
+                    let re = format!("^[ \t]*function[ \t]*{}\\.send_{}\\({}\\)", table_name, self.msg_name_full, params);
+                    Regex::new(re.as_str()).unwrap()
+                } else {
+                    let re = format!("^[ \t]*function[ \t]*{}\\.on_{}\\(message\\)", table_name, self.msg_name_full);
+                    Regex::new(re.as_str()).unwrap()
+                }
+            }
+        }
     }
 }
 
@@ -794,6 +798,5 @@ impl Field {
 }
 
 struct CommandLineOp {
-    dir: String,
     show_func_write: bool,
 }
