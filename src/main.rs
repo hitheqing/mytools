@@ -10,6 +10,9 @@ static mut COMMAND_LINE_OP: CommandLineOp = CommandLineOp { show_func_write: fal
 fn main() {
     for x in std::env::args() {
         println!("---arg:{}", x);
+    }
+
+    for x in std::env::args() {
         if x == "proto_2_lua" {
             proto_2_lua::main();
             return;

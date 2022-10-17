@@ -3,10 +3,11 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Seek, Write};
 use std::os::windows::fs::FileExt;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use regex::Regex;
 
-pub use class_def::*;
+use class_def::*;
 
 use crate::COMMAND_LINE_OP;
 
@@ -16,26 +17,39 @@ pub fn main() {
     // parse args
     let args: Vec<String> = std::env::args().collect();
 
-    let mut dir = Path::new("");
+    let mut dir = Path::new("./src");
     if let Some(v) = args.get(2) {
         dir = Path::new(v.as_str());
     }
 
-    let mut mod_dir = Path::new(".\\Mod");
+    let mut mod_dir = Path::new("./Mod");
     if let Some(v) = args.get(3) {
         mod_dir = Path::new(v.as_str());
     }
 
-    println!("mod_dir {:?}", fs::canonicalize(dir));
-    println!("mod_dir {:?}", fs::canonicalize(mod_dir));
+    let mut show_func_write = false;
 
+    // run --package mytools --bin mytools proto_2_lua protodir=./src  moddir=./Mod show_func_write=true
     for x in &args {
-        if x == "show_func_write" {
-            unsafe {
-                COMMAND_LINE_OP.show_func_write = true;
-            }
+        if x.contains("protodir") {
+            dir = Path::new(x.split("=").nth(1).unwrap());
+            continue;
+        }
+        if x.contains("moddir") {
+            mod_dir = Path::new(x.split("=").nth(1).unwrap());
+            continue;
+        }
+        if x.contains("show_func_write") {
+            show_func_write = bool::from_str(x.split("=").nth(1).unwrap()).unwrap();
+            unsafe { COMMAND_LINE_OP.show_func_write = show_func_write; }
+            continue;
         }
     }
+
+    // 文件绝对路径
+    println!("dir {:?}", fs::canonicalize(dir));
+    println!("mod_dir {:?}", fs::canonicalize(mod_dir));
+    println!("show_func_write {:?}", show_func_write);
 
     if let Ok(vec) = parse_dir(dir) {
         let client_suffix = "_Client_Handler";
