@@ -14,47 +14,45 @@ static mut COMMAND_LINE_OP: CommandLineOp = CommandLineOp {
     show_func_write: false,
 };
 
+// 第一个程序：读文件、正则匹配、文件结构parse、写文件
+
 fn main() {
     // parse args
-    // let dir = r"E:\Lua\proto\ds_client";
-    let v: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = std::env::args().collect();
+    let mut dir = Path::new("");
+    if args.get(1).is_some() {
+        eprintln!("args.get(1).unwrap().as_str() = {:#?}", args.get(1).unwrap().as_str());
+        dir = Path::new(args.get(1).unwrap().as_str());
+    }
 
-    for x in &v {
+    let mut mod_dir = Path::new(".\\Mod");
+    if args.get(2).is_some() {
+        eprintln!("args.get(2).unwrap().as_str() = {:#?}", args.get(2).unwrap().as_str());
+        mod_dir = Path::new(args.get(2).unwrap().as_str());
+    }
+
+    for x in &args {
+        println!("---arg:{}", x);
         if x == "show_func_write" {
             unsafe {
                 COMMAND_LINE_OP.show_func_write = true;
             }
         }
     }
-    let args_s = v.join(" ");
-    eprintln!("args_s = {:#?}", args_s);
 
-    let exe_path = std::env::args().nth(0).unwrap();
-    let arg1: String;
-    let mut dir = Path::new(exe_path.as_str());
-    if std::env::args().nth(1).is_some() {
-        arg1 = std::env::args().nth(1).unwrap();
-        dir = Path::new(arg1.as_str());
-    }
-
-    // let dir = Path::new("./src"); // for project test
-    // let dir = Path::new(r"E:\Lua\proto\ds_client\SocialIsland"); // real
-    // 第一个程序：读文件、正则匹配、文件结构parse、写文件
     if let Ok(vec) = parse_dir(dir) {
-        let mod_dir = ".\\Mod";
         let client_suffix = "_Client_Handler";
-        let ds_suffix = "_Ds_Handler";
+        let ds_suffix = "_DS_Handler";
 
         for file_struct in &vec {
             if let Ok(_) = write_lua_file(mod_dir, client_suffix, ds_suffix, file_struct) {}
         }
 
-        // GameLua.Mod.SocialIsland.GamePlay.Config.PBRouteConfig
         write_lua_route_config_file(mod_dir, &vec).expect("write route config failed");
     }
 }
 
-fn write_lua_route_config_file(mod_dir: &str, file_struct_vec: &Vec<FileStruct>) -> std::io::Result<()> {
+fn write_lua_route_config_file(mod_dir: &Path, file_struct_vec: &Vec<FileStruct>) -> std::io::Result<()> {
     if file_struct_vec.len() == 0 {
         return Ok(());
     }
@@ -303,7 +301,7 @@ fn parse_file(filepath: &Path) -> std::io::Result<FileStruct> {
 }
 
 /// 写入lua文件
-fn write_lua_file(mod_dir: &str, client_suffix: &str, ds_suffix: &str, file_struct: &FileStruct) -> std::io::Result<()> {
+fn write_lua_file(mod_dir: &Path, client_suffix: &str, ds_suffix: &str, file_struct: &FileStruct) -> std::io::Result<()> {
     // 4.将结果写入文件
 
     let c2d_list: Vec<&Message> = file_struct.messages.iter().filter(|x1| x1.msg_type == MessageType::Req).collect();
@@ -318,9 +316,9 @@ fn write_lua_file(mod_dir: &str, client_suffix: &str, ds_suffix: &str, file_stru
 
     let mod_name = file_struct.mod_name.as_str();
     let ds_file_name = format!("{}_{}{}.lua", file_struct.mod_name, file_struct.file_name, ds_suffix);
-    let ds_path = Path::new(mod_dir).join(mod_name).join("DS").join("Handler").join(ds_file_name);
+    let ds_path = mod_dir.join(mod_name).join("DS").join("Handler").join(ds_file_name);
     let client_file_name = format!("{}_{}{}.lua", file_struct.mod_name, file_struct.file_name, client_suffix);
-    let client_path = Path::new(mod_dir).join(mod_name).join("Client").join("Handler").join(client_file_name);
+    let client_path = mod_dir.join(mod_name).join("Client").join("Handler").join(client_file_name);
 
     // &mut c2d_list 这些容器传进去，有可能被移除其中的元素（找到存在的会剔除）。然后在下面依然用到了，会被改变的。所以这里类型应该就是原始vector。
     create_or_update_file(
@@ -478,7 +476,7 @@ fn insert_function_code(
     for message in struct_msg_list {
         unsafe {
             if COMMAND_LINE_OP.show_func_write {
-                println!("insert_function_code  name:{}", message.msg_name_full);
+                println!("--func:{}", message.msg_name_full);
             }
         }
 
@@ -504,7 +502,7 @@ fn insert_function_code(
     for message in on_msg_list {
         unsafe {
             if COMMAND_LINE_OP.show_func_write {
-                println!("insert_function_code  name:{}", message.msg_name_full);
+                println!("--func:{}", message.msg_name_full);
             }
         }
         // comment
@@ -571,7 +569,7 @@ fn insert_function_code(
     for message in send_msg_list {
         unsafe {
             if COMMAND_LINE_OP.show_func_write {
-                println!("insert_function_code  name:{}", message.msg_name_full);
+                println!("--func:{}", message.msg_name_full);
             }
         }
         // comment
@@ -691,9 +689,16 @@ impl Message {
         let field_names: Vec<String> = self.fields.iter().map(|x| x.field_name.to_string()).collect();
         let mut params = field_names.join(", ");
 
-        if is_ds {
-            params = format!("playerUid, {}", params);
+        if field_names.len() > 0 {
+            if is_ds {
+                params = format!("playerUid, {}", params);
+            }
+        } else {
+            if is_ds {
+                params = format!("playerUid");
+            }
         }
+
         if is_need_prefix {
             params = format!(", {}", params);
         }
