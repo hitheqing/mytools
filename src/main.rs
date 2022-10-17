@@ -4,6 +4,7 @@ use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::BufReader;
 use std::io::prelude::*;
+use std::ops::Add;
 use std::os::windows::fs::FileExt;
 use std::path::{Path, PathBuf};
 
@@ -481,21 +482,8 @@ fn insert_function_code(
         }
 
         // class define
-        write!(file, "{}", format!("---@class {} {}\n", message.msg_name_full, message.comment))?;
-
-        // local
-        write!(file, "{}", format!("local {} = {{\n", message.msg_name_full))?;
-
-        let s: Vec<String> = message
-            .fields
-            .iter()
-            .map(|x| format!("\t---{} {}\t{} = {}, \n", x.get_type_string(), x.comment, x.field_name, x.get_default_value()))
-            .collect();
-        let param_comment = s.join("");
-        // params
-        write!(file, "{}", param_comment)?;
-        // end
-        write!(file, "{}", format!("}}\n\n"))?;
+        write!(file, "{}", message.gen_class_doc_comment(""))?;
+        write!(file, "{}", message.gen_table_string("--"))?;
     }
 
     // on functions
@@ -505,15 +493,7 @@ fn insert_function_code(
                 println!("--func:{}", message.msg_name_full);
             }
         }
-        // comment
-        write!(file, "{}", format!("---{}\n", message.comment))?;
-        let params_doc_comment_vec: Vec<String> = message
-            .fields
-            .iter()
-            .map(|x| format!("---@param {} {} {}\n", x.field_name, x.get_type_string(), x.comment))
-            .collect();
-        let param_comment = params_doc_comment_vec.join("");
-        write!(file, "{}", param_comment)?;
+        write!(file, "{}", message.gen_func_doc_comment(""))?;
 
         // function
         if is_ds {
@@ -572,15 +552,7 @@ fn insert_function_code(
                 println!("--func:{}", message.msg_name_full);
             }
         }
-        // comment
-        write!(file, "{}", format!("---{}\n", message.comment))?;
-        let s: Vec<String> = message
-            .fields
-            .iter()
-            .map(|x| format!("---@param {} {} {}\n", x.field_name, x.get_type_string(), x.comment))
-            .collect();
-        let param_comment = s.join("");
-        write!(file, "{}", param_comment)?;
+        write!(file, "{}", message.gen_func_doc_comment(""))?;
 
         // function
         let params = message.get_params_str_in_func(is_ds, false);
@@ -731,6 +703,45 @@ impl Message {
             params_1 = format!("playerUid:%s, {}", params_1);
         }
         params_1
+    }
+
+    pub fn gen_func_doc_comment(&self, prefix: &str) -> String {
+        let mut ret = String::new();
+        let s = format!("---{}\n", self.comment);
+        let s = format!("{}{}", prefix, s);
+        ret.push_str(s.as_str());
+        for x in &self.fields {
+            let s = format!("---@param {} {} {}\n", x.field_name, x.get_type_string(), x.comment);
+            let s = format!("{}{}", prefix, s);
+            ret.push_str(s.as_str());
+        }
+        ret
+    }
+
+    pub fn gen_class_doc_comment(&self, prefix: &str) -> String {
+        let mut ret = String::new();
+        let s = format!("---@class {}\n", self.msg_name_full);
+        ret.push_str(format!("{}{}", prefix, s).as_str());
+        for x in &self.fields {
+            let s = format!("---@field {} {} {}\n", x.field_name, x.get_type_string(), x.comment);
+            ret.push_str(format!("{}{}", prefix, s).as_str());
+        }
+        ret
+    }
+
+    pub fn gen_table_string(&self, prefix: &str) -> String {
+        let mut ret = String::new();
+
+        // local
+        let s = format!("local {} = {{\n", self.msg_name_full);
+        ret.push_str(format!("{}{}", prefix, s).as_str());
+        for x in &self.fields {
+            let s = format!("\t{} = {},\n", x.field_name, x.get_default_value());
+            ret.push_str(format!("{}{}", prefix, s).as_str());
+        }
+        let s = format!("}}\n\n");
+        ret.push_str(format!("{}{}", prefix, s).as_str());
+        ret
     }
 }
 
