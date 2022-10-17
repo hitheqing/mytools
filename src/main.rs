@@ -9,10 +9,23 @@ use std::path::{Path, PathBuf};
 
 use regex::Regex;
 
+static mut COMMAND_LINE_OP: CommandLineOp = CommandLineOp {
+    dir: String::new(),
+    show_func_write: false,
+};
+
 fn main() {
     // parse args
     // let dir = r"E:\Lua\proto\ds_client";
     let v: Vec<String> = std::env::args().collect();
+
+    for x in &v {
+        if x == "show_func_write" {
+            unsafe {
+                COMMAND_LINE_OP.show_func_write = true;
+            }
+        }
+    }
     let args_s = v.join(" ");
     eprintln!("args_s = {:#?}", args_s);
 
@@ -290,17 +303,16 @@ fn parse_file(filepath: &Path) -> std::io::Result<FileStruct> {
 }
 
 /// 写入lua文件
-fn write_lua_file(
-    mod_dir: &str,
-    client_suffix: &str,
-    ds_suffix: &str,
-    file_struct: &FileStruct,
-) -> std::io::Result<()> {
+fn write_lua_file(mod_dir: &str, client_suffix: &str, ds_suffix: &str, file_struct: &FileStruct) -> std::io::Result<()> {
     // 4.将结果写入文件
 
     let c2d_list: Vec<&Message> = file_struct.messages.iter().filter(|x1| x1.msg_type == MessageType::Req).collect();
 
-    let d2c_list: Vec<&Message> = file_struct.messages.iter().filter(|x1| x1.msg_type == MessageType::Rsp || x1.msg_type == MessageType::Notify).collect();
+    let d2c_list: Vec<&Message> = file_struct
+        .messages
+        .iter()
+        .filter(|x1| x1.msg_type == MessageType::Rsp || x1.msg_type == MessageType::Notify)
+        .collect();
 
     let struct_list: Vec<&Message> = file_struct.messages.iter().filter(|x1| x1.msg_type == MessageType::Struct).collect();
 
@@ -367,16 +379,9 @@ fn create_or_update_file(
 
         let mut re_list_send: Vec<Regex> = vec![];
         for message in send_msg_list.iter() {
-            if is_ds {
-                let params = message.get_params_str_in_func(true, false);
-                // 参数可能为0
-                let res = format!("^[ \t]*function[ \t]*{}\\.send_{}\\(playerUid{}\\)", table_name, message.msg_name_full, params);
-                re_list_send.push(Regex::new(res.as_str()).unwrap());
-            } else {
-                let params = message.get_params_str_in_func(false, false);
-                let res = format!("^[ \t]*function[ \t]*{}\\.send_{}\\({}\\)", table_name, message.msg_name_full, params);
-                re_list_send.push(Regex::new(res.as_str()).unwrap());
-            }
+            let params = message.get_params_str_in_func(is_ds, false);
+            let res = format!("^[ \t]*function[ \t]*{}\\.send_{}\\({}\\)", table_name, message.msg_name_full, params);
+            re_list_send.push(Regex::new(res.as_str()).unwrap());
         }
 
         let mut re_list_struct: Vec<Regex> = vec![];
@@ -471,14 +476,22 @@ fn insert_function_code(
 ) -> std::io::Result<()> {
     // structs class hint
     for message in struct_msg_list {
-        println!("insert_function_code  name:{}", message.msg_name_full);
+        unsafe {
+            if COMMAND_LINE_OP.show_func_write {
+                println!("insert_function_code  name:{}", message.msg_name_full);
+            }
+        }
+
         // class define
         write!(file, "{}", format!("---@class {} {}\n", message.msg_name_full, message.comment))?;
 
         // local
         write!(file, "{}", format!("local {} = {{\n", message.msg_name_full))?;
 
-        let s: Vec<String> = message.fields.iter().map(|x| format!("\t---{} {}\t{} = {}, \n", x.get_type_string(), x.comment, x.field_name, x.get_default_value()))
+        let s: Vec<String> = message
+            .fields
+            .iter()
+            .map(|x| format!("\t---{} {}\t{} = {}, \n", x.get_type_string(), x.comment, x.field_name, x.get_default_value()))
             .collect();
         let param_comment = s.join("");
         // params
@@ -489,10 +502,17 @@ fn insert_function_code(
 
     // on functions
     for message in on_msg_list {
-        println!("insert_function_code  name:{}", message.msg_name_full);
+        unsafe {
+            if COMMAND_LINE_OP.show_func_write {
+                println!("insert_function_code  name:{}", message.msg_name_full);
+            }
+        }
         // comment
         write!(file, "{}", format!("---{}\n", message.comment))?;
-        let params_doc_comment_vec: Vec<String> = message.fields.iter().map(|x| format!("---@param {} {} {}\n", x.field_name, x.get_type_string(), x.comment))
+        let params_doc_comment_vec: Vec<String> = message
+            .fields
+            .iter()
+            .map(|x| format!("---@param {} {} {}\n", x.field_name, x.get_type_string(), x.comment))
             .collect();
         let param_comment = params_doc_comment_vec.join("");
         write!(file, "{}", param_comment)?;
@@ -508,11 +528,11 @@ fn insert_function_code(
         // print
         if message.fields.len() > 0 {
             let s = format!(
-                "\tprint(bWriteLog and string.format(\"{}.on_{} {}\",{}))\n",
+                "\tprint(bWriteLog and string.format(\"{}.on_{} {}\"{}))\n",
                 table_name,
                 message.msg_name_full,
-                message.get_print_params_format_str(),
-                message.get_params_str_in_func(false, false)
+                message.get_print_params_format_str(is_ds),
+                message.get_params_str_in_func_with_message(is_ds)
             );
             write!(file, "{}", s)?;
         } else {
@@ -525,13 +545,13 @@ fn insert_function_code(
             for target_message in &file_struct.messages {
                 unsafe {
                     if target_message.msg_name_full == (*ptr).msg_name_full {
-                        println!("--find rsp:{} for req:{}", target_message.msg_name_full, message.msg_name_full);
+                        // println!("--find rsp:{} for req:{}", target_message.msg_name_full, message.msg_name_full);
                         for x in &target_message.fields {
                             write!(file, "{}", format!("\tlocal {} = {}\n", x.field_name, x.get_default_value()))?;
                         }
 
                         let s = format!(
-                            "\t{}.send_{}(playerUid{})\n",
+                            "\t{}.send_{}({})\n",
                             table_name,
                             target_message.msg_name_full,
                             target_message.get_params_str_in_func(true, false)
@@ -549,30 +569,32 @@ fn insert_function_code(
 
     // send functions
     for message in send_msg_list {
-        println!("insert_function_code  name:{}", message.msg_name_full);
+        unsafe {
+            if COMMAND_LINE_OP.show_func_write {
+                println!("insert_function_code  name:{}", message.msg_name_full);
+            }
+        }
         // comment
         write!(file, "{}", format!("---{}\n", message.comment))?;
-        let s: Vec<String> = message.fields.iter().map(|x| format!("---@param {} {} {}\n", x.field_name, x.get_type_string(), x.comment))
+        let s: Vec<String> = message
+            .fields
+            .iter()
+            .map(|x| format!("---@param {} {} {}\n", x.field_name, x.get_type_string(), x.comment))
             .collect();
         let param_comment = s.join("");
         write!(file, "{}", param_comment)?;
 
         // function
-        if is_ds {
-            let params = message.get_params_str_in_func(true, false);
-            let s = format!("function {}.send_{}(playerUid{})\n", table_name, message.msg_name_full, params);
-            write!(file, "{}", s)?;
-        } else {
-            let params = message.get_params_str_in_func(false, false);
-            write!(file, "{}", format!("function {}.send_{}({})\n", table_name, message.msg_name_full, params))?;
-        }
+        let params = message.get_params_str_in_func(is_ds, false);
+        let s = format!("function {}.send_{}({})\n", table_name, message.msg_name_full, params);
+        write!(file, "{}", s)?;
 
         // print
         if message.fields.len() > 0 {
-            let s1 = message.get_print_params_format_str();
-            let s2 = message.get_params_str_in_func(false, false);
+            let s1 = message.get_print_params_format_str(is_ds);
+            let s2 = message.get_params_str_in_func(is_ds, true);
             let s = format!(
-                "\tprint(bWriteLog and string.format(\"{}.send_{} {}\",{}))\n",
+                "\tprint(bWriteLog and string.format(\"{}.send_{} {}\"{}))\n",
                 table_name, message.msg_name_full, s1, s2
             );
             write!(file, "{}", s)?;
@@ -584,7 +606,8 @@ fn insert_function_code(
         // content
         write!(file, "{}", format!("\tlocal res_param = {{\n"))?;
         // params
-        let s: Vec<String> = message.fields
+        let s: Vec<String> = message
+            .fields
             .iter()
             .map(|x1| format!("\t\t{} = {},\n", x1.field_name, x1.field_name))
             .collect();
@@ -663,27 +686,45 @@ impl Message {
         }
     }
 
-    pub fn get_params_str_in_func(&self, need_prefix: bool, need_suffix: bool) -> String {
+    pub fn get_params_str_in_func(&self, is_ds: bool, is_need_prefix: bool) -> String {
         // params
         let field_names: Vec<String> = self.fields.iter().map(|x| x.field_name.to_string()).collect();
         let mut params = field_names.join(", ");
-        if field_names.len() > 0 {
-            if need_prefix {
-                params = format!(", {}", params);
-            }
-            if need_suffix {
-                params = format!("{}, ", params);
-            }
-        } else {
-            params = "".to_string();
+
+        if is_ds {
+            params = format!("playerUid, {}", params);
+        }
+        if is_need_prefix {
+            params = format!(", {}", params);
         }
         params
     }
 
-    pub(crate) fn get_print_params_format_str(&self) -> String {
+    pub fn get_params_str_in_func_with_message(&self, is_ds: bool) -> String {
+        // params
+        let field_names: Vec<String> = self.fields.iter().map(|x| x.field_name.to_string()).collect();
+        let mut params = field_names.join(", message.");
+        if field_names.len() > 0 {
+            params = format!(", message.{}", params);
+            if is_ds {
+                params = format!(", playerUid{}", params);
+            }
+        } else {
+            params = "".to_string();
+            if is_ds {
+                params = ", playerUid".to_string();
+            }
+        }
+        params
+    }
+
+    pub(crate) fn get_print_params_format_str(&self, is_ds: bool) -> String {
         // params
         let s: Vec<String> = self.fields.iter().map(|x| x.field_name.to_string()).collect();
-        let params_1 = s.join(":%s, ").as_str().to_owned() + ":%s";
+        let mut params_1 = s.join(":%s, ").as_str().to_owned() + ":%s";
+        if is_ds {
+            params_1 = format!("playerUid:%s, {}", params_1);
+        }
         params_1
     }
 }
@@ -734,4 +775,9 @@ impl Field {
             }
         }
     }
+}
+
+struct CommandLineOp {
+    dir: String,
+    show_func_write: bool,
 }
