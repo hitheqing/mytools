@@ -33,6 +33,7 @@ function src_example_DS_Handler.send_test_1_arg_rsp(playerUid, pa, pb)
 		pa = pa,
 		pb = pb,
 	}
+
 	ds_net.SendMessage("src.test_1_arg_rsp", res_param, playerUid)
 end
 
@@ -45,6 +46,7 @@ function src_example_DS_Handler.send_test_notify(playerUid, nn1, nocomment)
 		nn1 = nn1,
 		nocomment = nocomment,
 	}
+
 	ds_net.SendMessage("src.test_notify", res_param, playerUid)
 end
 

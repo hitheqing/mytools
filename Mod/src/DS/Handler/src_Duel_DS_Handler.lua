@@ -25,6 +25,7 @@ function src_Duel_DS_Handler.send_social_island_duel_start_rsp(playerUid, orign_
 		duel_target_uid = duel_target_uid,
 		duel_response = duel_response,
 	}
+
 	ds_net.SendMessage("src.social_island_duel_start_rsp", res_param, playerUid)
 end
 
@@ -37,6 +38,7 @@ function src_Duel_DS_Handler.send_social_island_duel_apply_notify(playerUid, ori
 		orign_uid = orign_uid,
 		duel_type = duel_type,
 	}
+
 	ds_net.SendMessage("src.social_island_duel_apply_notify", res_param, playerUid)
 end
 
@@ -60,6 +62,7 @@ function src_Duel_DS_Handler.send_social_island_duel_result_notify(playerUid, du
 		duel_type = duel_type,
 		winner_uid = winner_uid,
 	}
+
 	ds_net.SendMessage("src.social_island_duel_result_notify", res_param, playerUid)
 end
 

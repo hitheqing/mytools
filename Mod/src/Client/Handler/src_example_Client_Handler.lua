@@ -15,6 +15,7 @@ function src_example_Client_Handler.send_test_only_req()
 	print(bWriteLog and string.format("src_example_Client_Handler.test_only_req "))
 	local res_param = {
 	}
+
 	ds_net.SendMessage("src.test_only_req", res_param)
 end
 
@@ -25,6 +26,7 @@ function src_example_Client_Handler.send_test_1_arg_req(pa)
 	local res_param = {
 		pa = pa,
 	}
+
 	ds_net.SendMessage("src.test_1_arg_req", res_param)
 end
 

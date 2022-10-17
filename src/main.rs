@@ -411,7 +411,7 @@ fn insert_function_code(remain_messages: Vec<&Message>, file: &mut File, table_n
         if MessageType::Struct == message.msg_type {
             // class define
             write!(file, "{}", message.gen_class_doc_comment(""))?;
-            write!(file, "{}", message.gen_table_string("--"))?;
+            write!(file, "{}", message.gen_table_string("--", None, true))?;
         } else if MessageType::Req == message.msg_type {
             // function doc
             write!(file, "{}", message.gen_func_doc_comment(""))?;
@@ -475,17 +475,7 @@ fn insert_function_code(remain_messages: Vec<&Message>, file: &mut File, table_n
                 }
             } else {
                 // content
-                write!(file, "{}", format!("\tlocal res_param = {{\n"))?;
-                // params
-                let s: Vec<String> = message
-                    .fields
-                    .iter()
-                    .map(|x1| format!("\t\t{} = {},\n", x1.field_name, x1.field_name))
-                    .collect();
-                let params = s.join("");
-                write!(file, "{}", format!("{}", params))?;
-                write!(file, "{}", format!("\t}}\n"))?;
-
+                write!(file, "{}", message.gen_table_string("\t", Some("res_param"), false))?;
                 if is_ds {
                     let s = format!(
                         "\tds_net.SendMessage(\"{}.{}\", res_param, playerUid)\n",
@@ -538,16 +528,7 @@ fn insert_function_code(remain_messages: Vec<&Message>, file: &mut File, table_n
 
             if is_ds {
                 // content
-                write!(file, "{}", format!("\tlocal res_param = {{\n"))?;
-                // params
-                let s: Vec<String> = message
-                    .fields
-                    .iter()
-                    .map(|x1| format!("\t\t{} = {},\n", x1.field_name, x1.field_name))
-                    .collect();
-                let params = s.join("");
-                write!(file, "{}", format!("{}", params))?;
-                write!(file, "{}", format!("\t}}\n"))?;
+                write!(file, "{}", message.gen_table_string("\t", Some("res_param"), false))?;
 
                 if is_ds {
                     let s = format!(
@@ -706,14 +687,32 @@ impl Message {
         ret
     }
 
-    pub fn gen_table_string(&self, prefix: &str) -> String {
+    ///
+    ///
+    /// # Arguments
+    ///
+    /// * `prefix`: 前缀。 如果注释 --  如果tab \t
+    /// * `new_table_name`: 变量名 。none则使用message本身
+    /// * `use_value`: 使用默认值， 否则使用 field变量名本身
+    ///
+    /// returns: String
+    pub fn gen_table_string(&self, prefix: &str, new_table_name: Option<&str>, use_value: bool) -> String {
         let mut ret = String::new();
 
         // local
-        let s = format!("local {} = {{\n", self.msg_name_full);
+        let s = match new_table_name {
+            None => {
+                format!("local {} = {{\n", self.msg_name_full)
+            }
+            Some(table_name) => {
+                format!("local {} = {{\n", table_name)
+            }
+        };
+        // let s = format!("local {} = {{\n", self.msg_name_full);
         ret.push_str(format!("{}{}", prefix, s).as_str());
         for x in &self.fields {
-            let s = format!("\t{} = {},\n", x.field_name, x.get_default_value());
+            let s = if use_value { x.get_default_value() } else { x.field_name.as_str() };
+            let s = format!("\t{} = {},\n", x.field_name, s);
             ret.push_str(format!("{}{}", prefix, s).as_str());
         }
         let s = format!("}}\n\n");

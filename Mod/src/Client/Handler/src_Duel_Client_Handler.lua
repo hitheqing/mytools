@@ -13,6 +13,7 @@ function src_Duel_Client_Handler.send_social_island_duel_start_req(orign_uid, du
 		duel_target_uid = duel_target_uid,
 		duel_type = duel_type,
 	}
+
 	ds_net.SendMessage("src.social_island_duel_start_req", res_param)
 end
 
@@ -44,6 +45,7 @@ function src_Duel_Client_Handler.send_social_island_response_duel_req(orign_uid,
 		duel_type = duel_type,
 		duel_response = duel_response,
 	}
+
 	ds_net.SendMessage("src.social_island_response_duel_req", res_param)
 end
 
