@@ -377,7 +377,7 @@ fn create_or_update_file(path: &PathBuf, file_struct: &FileStruct, is_ds: bool) 
             insert_function_code(remain_messages, &mut file, table_name, file_struct, is_ds)?;
             // return
             write!(file, "{}", format!("return {}\n", table_name))?;
-        }else {
+        } else {
             // println!("----keep file {}----", path.as_path().to_str().unwrap());
         }
     } else {
@@ -473,6 +473,29 @@ fn insert_function_code(remain_messages: Vec<&Message>, file: &mut File, table_n
                         }
                     }
                 }
+            } else {
+                // content
+                write!(file, "{}", format!("\tlocal res_param = {{\n"))?;
+                // params
+                let s: Vec<String> = message
+                    .fields
+                    .iter()
+                    .map(|x1| format!("\t\t{} = {},\n", x1.field_name, x1.field_name))
+                    .collect();
+                let params = s.join("");
+                write!(file, "{}", format!("{}", params))?;
+                write!(file, "{}", format!("\t}}\n"))?;
+
+                if is_ds {
+                    let s = format!(
+                        "\tds_net.SendMessage(\"{}.{}\", res_param, playerUid)\n",
+                        file_struct.mod_name, message.msg_name_full
+                    );
+                    write!(file, "{}", s)?;
+                } else {
+                    let s = format!("\tds_net.SendMessage(\"{}.{}\", res_param)\n", file_struct.mod_name, message.msg_name_full);
+                    write!(file, "{}", s)?;
+                }
             }
 
             // end
@@ -509,6 +532,31 @@ fn insert_function_code(remain_messages: Vec<&Message>, file: &mut File, table_n
                     write!(file, "{}", s)?;
                 } else {
                     let s = format!("\tprint(bWriteLog and string.format(\"{}.{} \"))\n", table_name, message.msg_name_full);
+                    write!(file, "{}", s)?;
+                }
+            }
+
+            if is_ds {
+                // content
+                write!(file, "{}", format!("\tlocal res_param = {{\n"))?;
+                // params
+                let s: Vec<String> = message
+                    .fields
+                    .iter()
+                    .map(|x1| format!("\t\t{} = {},\n", x1.field_name, x1.field_name))
+                    .collect();
+                let params = s.join("");
+                write!(file, "{}", format!("{}", params))?;
+                write!(file, "{}", format!("\t}}\n"))?;
+
+                if is_ds {
+                    let s = format!(
+                        "\tds_net.SendMessage(\"{}.{}\", res_param, playerUid)\n",
+                        file_struct.mod_name, message.msg_name_full
+                    );
+                    write!(file, "{}", s)?;
+                } else {
+                    let s = format!("\tds_net.SendMessage(\"{}.{}\", res_param)\n", file_struct.mod_name, message.msg_name_full);
                     write!(file, "{}", s)?;
                 }
             }
