@@ -11,7 +11,7 @@ rem pb生成
 rem LuaNet\LuaNetCreater.exe proto_to_pb %cd%\..\proto
 
 rem DS协议代码生成
-mytools.exe %cd%\..\proto\ds_client\SocialIsland %cd%\..\GameLua\Mod\ show_func_write
+mytools.exe %cd%\..\proto\ds_client\SocialIsland %cd%\..\GameLua\Mod\
 
 echo Run Success.
 pause

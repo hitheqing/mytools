@@ -1,3 +1,7 @@
+use std::{
+    mem::MaybeUninit,
+    sync::{Mutex, Once},
+};
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Seek, Write};
@@ -5,61 +9,72 @@ use std::os::windows::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+use pb_rs::types::Config;
 use regex::Regex;
 
 use class_def::*;
 
-use crate::COMMAND_LINE_OP;
+use crate::{IDefault, Mode, MyApp};
 
 mod class_def;
 
-pub fn main() {
-    // parse args
-    let args: Vec<String> = std::env::args().collect();
+fn init_config(default: Option<MyApp>) -> &'static MyApp {
+    // 使用MaybeUninit延迟初始化
+    static mut CONF: MaybeUninit<MyApp> = MaybeUninit::uninit();
+    // Once带锁保证只进行一次初始化
+    static ONCE: Once = Once::new();
 
-    let mut dir = Path::new("./src");
-    if let Some(v) = args.get(2) {
-        dir = Path::new(v.as_str());
-    }
-
-    let mut mod_dir = Path::new("./Mod");
-    if let Some(v) = args.get(3) {
-        mod_dir = Path::new(v.as_str());
-    }
-
-    let mut show_func_write = false;
-
-    // run --package mytools --bin mytools proto_2_lua protodir=./src  moddir=./Mod show_func_write=true
-    for x in &args {
-        if x.contains("protodir") {
-            dir = Path::new(x.split("=").nth(1).unwrap());
-            continue;
-        }
-        if x.contains("moddir") {
-            mod_dir = Path::new(x.split("=").nth(1).unwrap());
-            continue;
-        }
-        if x.contains("show_func_write") {
-            show_func_write = bool::from_str(x.split("=").nth(1).unwrap()).unwrap();
-            unsafe { COMMAND_LINE_OP.show_func_write = show_func_write; }
-            continue;
+    match default {
+        None => {}
+        Some(v) => {
+            ONCE.call_once(|| unsafe {
+                CONF.as_mut_ptr().write(MyApp { ..v });
+            });
         }
     }
 
-    // 文件绝对路径
-    println!("dir {:?}", fs::canonicalize(dir));
-    println!("mod_dir {:?}", fs::canonicalize(mod_dir));
-    println!("show_func_write {:?}", show_func_write);
+    unsafe { &(*CONF.as_ptr()) }
+}
 
-    if let Ok(vec) = parse_dir(dir) {
-        let client_suffix = "_Client_Handler";
-        let ds_suffix = "_DS_Handler";
+fn get_config() -> &'static MyApp {
+    init_config(None)
+}
 
-        for file_struct in &vec {
+pub fn main(snake_case: MyApp) {
+    let config = init_config(Some(snake_case));
+    let client_suffix = "_Client_Handler";
+    let ds_suffix = "_DS_Handler";
+
+    if config.dir.is_none() {
+        let mut result: Vec<FileStruct> = vec![];
+        for file in &config.path {
+            let path = Path::new(file.as_str());
+            if path.is_file() {
+                let extension = path.extension().unwrap().to_str().unwrap();
+                if extension == "proto" {
+                    if let Ok(fs) = parse_file(path) {
+                        result.push(fs);
+                    }
+                }
+            }
+        }
+        let mod_dir = Path::new(config.output.as_str());
+        for file_struct in &result {
             if let Ok(_) = write_lua_file(mod_dir, client_suffix, ds_suffix, file_struct) {}
         }
 
-        write_lua_route_config_file(mod_dir, &vec).expect("write route config failed");
+        write_lua_route_config_file(mod_dir, &result).expect("write route config failed");
+    } else {
+        if let Some(dir) = &config.dir {
+            if let Ok(vec) = parse_dir(Path::new(dir.as_str())) {
+                let mod_dir = Path::new(config.output.as_str());
+                for file_struct in &vec {
+                    if let Ok(_) = write_lua_file(mod_dir, client_suffix, ds_suffix, file_struct) {}
+                }
+
+                write_lua_route_config_file(mod_dir, &vec).expect("write route config failed");
+            }
+        }
     }
 }
 
@@ -374,7 +389,10 @@ fn create_or_update_file(path: &PathBuf, file_struct: &FileStruct, is_ds: bool) 
         if remain_messages.len() > 0 {
             // 还剩下需要append的，加到后面
             let mut file = OpenOptions::new().write(true).open(path.as_path())?;
-            println!("----update file {}----", path.as_path().to_str().unwrap());
+
+            if get_config().debug {
+                println!("----update file {}----", path.as_path().to_str().unwrap());
+            }
 
             // 文件清空内容重新构造
             if append_pos == 0 {
@@ -396,7 +414,10 @@ fn create_or_update_file(path: &PathBuf, file_struct: &FileStruct, is_ds: bool) 
         }
     } else {
         if let Ok(mut file) = File::create(path.as_path()) {
-            println!("----create file {}----", path.as_path().to_str().unwrap());
+            if get_config().debug {
+                println!("----create file {}----", path.as_path().to_str().unwrap());
+            }
+
             write!(file, "--auto generated--\n")?;
 
             // table define
@@ -417,11 +438,10 @@ fn create_or_update_file(path: &PathBuf, file_struct: &FileStruct, is_ds: bool) 
 /// 插入函数代码
 fn insert_function_code(remain_messages: Vec<&Message>, file: &mut File, table_name: &str, file_struct: &FileStruct, is_ds: bool) -> std::io::Result<()> {
     for message in remain_messages {
-        unsafe {
-            if COMMAND_LINE_OP.show_func_write {
-                println!("--func:{}", message.msg_name_full);
-            }
+        if get_config().debug {
+            println!("--func:{}", message.msg_name_full);
         }
+
         if MessageType::Struct == message.msg_type {
             // class define
             write!(file, "{}", message.gen_class_doc_comment(""))?;

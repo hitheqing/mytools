@@ -1,25 +1,29 @@
-use std::path::Path;
+use clap::{Parser, ValueEnum};
 
-mod lib;
+use cliparse::Mode;
+use cliparse::MyApp;
+
+use crate::cliparse::IDefault;
+
+mod cliparse;
 mod proto_2_lua;
 
-static mut COMMAND_LINE_OP: CommandLineOp = CommandLineOp { show_func_write: false };
-
-// 第一个程序：读文件、正则匹配、文件结构parse、写文件
-
 fn main() {
-    for x in std::env::args() {
-        println!("---arg:{}", x);
+    let mut my_app: MyApp = MyApp::parse();
+    my_app.fill_default();
+
+    if my_app.debug {
+        eprintln!("my_app = {:#?}", my_app);
     }
 
-    for x in std::env::args() {
-        if x == "proto_2_lua" {
-            proto_2_lua::main();
-            return;
+    match my_app.mode {
+        Mode::Proto2lua => {
+            proto_2_lua::main(my_app);
+        }
+        Mode::Nothing => {
+            println!("to be continued");
         }
     }
-}
 
-struct CommandLineOp {
-    show_func_write: bool,
+    println!("success");
 }
