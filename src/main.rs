@@ -1,4 +1,5 @@
 use clap::{Parser, ValueEnum};
+use clap::{Arg, ArgAction, command};
 
 use cliparse::Mode;
 use cliparse::MyApp;
@@ -9,6 +10,18 @@ mod cliparse;
 mod proto_2_lua;
 
 fn main() {
+    // let matches = command!() // requires `cargo` feature
+    //     .arg(
+    //         Arg::new("verbose")
+    //             .short('s')
+    //             .long("verbose")
+    //             .action(ArgAction::Count),
+    //     )
+    //     .get_matches();
+    //
+    // println!("verbose: {:?}", matches.get_count("verbose"));
+
+
     let mut my_app: MyApp = MyApp::parse();
     my_app.fill_default();
 

@@ -9,7 +9,7 @@ edition = "2021"
 regex = "1.6.0"
 lazy_static = "1.4.0"
 pb-rs = "0.9.1"
-clap = { version = "4.0", features = ["derive"] }
+clap = { version = "4.0", features = ["derive","cargo"] }
 
 [profile.dev]
 opt-level = 0

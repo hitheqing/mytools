@@ -63,7 +63,9 @@ pub fn main(snake_case: MyApp) {
             if let Ok(_) = write_lua_file(mod_dir, client_suffix, ds_suffix, file_struct) {}
         }
 
-        write_lua_route_config_file(mod_dir, &result).expect("write route config failed");
+        if config.write_route_config {
+            write_lua_route_config_file(mod_dir, &result).expect("write route config failed");
+        }
     } else {
         if let Some(dir) = &config.dir {
             if let Ok(vec) = parse_dir(Path::new(dir.as_str())) {
@@ -72,7 +74,9 @@ pub fn main(snake_case: MyApp) {
                     if let Ok(_) = write_lua_file(mod_dir, client_suffix, ds_suffix, file_struct) {}
                 }
 
-                write_lua_route_config_file(mod_dir, &vec).expect("write route config failed");
+                if config.write_route_config {
+                    write_lua_route_config_file(mod_dir, &vec).expect("write route config failed");
+                }
             }
         }
     }

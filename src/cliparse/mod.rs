@@ -12,6 +12,7 @@ use clap::{Parser, ValueEnum};
 /// 	3. 有arg申明的 ，是选项
 /// 	4. long，以全称的方式赋值 --name xxx
 /// 	5. short，使用短名,这三个等价 -nxxx -n xxx -n=xxx
+///     5.1 可以short('s')来指定 short name。
 /// 	6. bool 类型必须定义成arg. 且输入只能有0或者1个， 表示true或false。否则报错
 ///
 ///
@@ -24,7 +25,7 @@ use clap::{Parser, ValueEnum};
 /// 	1. 不需要定义成arg， 直接定义成name: Vec<String>,
 ///
 /// # 默认值
-///		1. #[arg(default_value_t = 2020)]
+///    	1. #[arg(default_value_t = 2020)]
 ///
 ///
 /// # 枚举
@@ -58,15 +59,26 @@ pub struct MyApp {
 
     // options
     /// 是否显示调试信息
-    #[arg(long)]
+    #[arg(short('s'), long)]
     pub debug: bool,
+
+    /// 是否输出PBRouteConfig
+    #[arg(short, long)]
+    pub write_route_config: bool,
     /// 如果有目录,就无视前面的路径
-    #[arg(short)]
+    #[arg(long)]
     pub dir: Option<String>,
 
     /// 输出目录 默认"./"
     #[arg(short)]
     pub output: String,
+
+    // pub client_suffix: Option<String>,
+
+}
+
+fn _Client_Handler()->String{
+    "_Client_Handler".to_string()
 }
 
 impl IDefault<MyApp> for MyApp {
@@ -81,8 +93,10 @@ impl IDefault<MyApp> for MyApp {
             mode: Mode::Proto2lua,
             path: vec![],
             debug: false,
+            write_route_config: false,
             dir: None,
             output: "".to_string(),
+            // client_suffix: "".to_string()
         }
     }
 
@@ -97,11 +111,11 @@ impl IDefault<MyApp> for MyApp {
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
 pub enum Mode {
-    /// Proto2lua 输入要转换的proto文件
+    /// # Proto2lua 输入要转换的proto文件
     /// # dir usage:
     /// ### cargo run -- proto2lua --debug -d ./src -o ./mod
     /// # files usage:
-    /// ### cargo run -- proto2lua --debug ./src/example.proto -o ./mod
+    /// ### cargo run -- proto2lua --debug ./src/example.proto ./src/Duel.proto -o ./mod
     Proto2lua,
     /// 啥也不是,待续
     Nothing,
