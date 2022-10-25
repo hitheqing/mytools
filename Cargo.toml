@@ -10,6 +10,7 @@ regex = "1.6.0"
 lazy_static = "1.4.0"
 pb-rs = "0.9.1"
 clap = { version = "4.0", features = ["derive","cargo"] }
+nom = "3.2.1"
 
 [profile.dev]
 opt-level = 0
