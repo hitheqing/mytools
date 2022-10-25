@@ -14,31 +14,10 @@ use regex::Regex;
 
 use class_def::*;
 
-use crate::{IDefault, Mode, MyApp};
+use crate::{get_config, IDefault, init_config, Mode, MyApp};
 
 mod class_def;
 
-fn init_config(default: Option<MyApp>) -> &'static MyApp {
-    // 使用MaybeUninit延迟初始化
-    static mut CONF: MaybeUninit<MyApp> = MaybeUninit::uninit();
-    // Once带锁保证只进行一次初始化
-    static ONCE: Once = Once::new();
-
-    match default {
-        None => {}
-        Some(v) => {
-            ONCE.call_once(|| unsafe {
-                CONF.as_mut_ptr().write(MyApp { ..v });
-            });
-        }
-    }
-
-    unsafe { &(*CONF.as_ptr()) }
-}
-
-fn get_config() -> &'static MyApp {
-    init_config(None)
-}
 
 pub fn main(snake_case: MyApp) {
     let config = init_config(Some(snake_case));

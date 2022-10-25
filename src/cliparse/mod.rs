@@ -110,6 +110,8 @@ pub enum Mode {
     /// # files usage:
     /// ### cargo run -- proto2lua --debug ./src/example.proto ./src/Duel.proto -o ./mod
     Proto2lua,
+
+    Proto2luaNew,
     /// 啥也不是,待续
     Nothing,
 }

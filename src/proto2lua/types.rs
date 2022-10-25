@@ -56,6 +56,7 @@ pub struct EnumIndex {
 	index: usize,
 }
 
+#[warn(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FieldType {
 	Int32,

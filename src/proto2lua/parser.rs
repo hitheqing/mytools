@@ -52,9 +52,10 @@ named!(
     do_parse!(tag!("/*") >> take_until_and_consume!("*/") >> ())
 );
 
+// 多个 /////
 named!(
     take_comment<String>,
-    do_parse!(many0!(br) >> tag!("//") >>content: take_until_and_consume!("\n") >> (String::from_utf8(content.to_vec()).unwrap()))
+    do_parse!(tag!("//") >> many0!(tag!("/")) >>content: take_until_and_consume!("\n") >> (String::from_utf8(content.to_vec()).unwrap()))
 );
 named!(
     take_block_comment<String>,
@@ -64,19 +65,19 @@ named!(
 // word break: multispace or comment
 named!(
     br<()>,
-    // alt!(map!(multispace, |_| ()) | comment | block_comment)
-    alt!(map!(multispace, |_| ()))
+    alt!(map!(multispace, |_| ()) | comment | block_comment)
+    // alt!(map!(multispace, |_| ()))
 );
 
-// word break: multispace or comment
+// multispace or comment
 named!(
-    br_with_comment<()>,
+    br_or_comment<()>,
     alt!(map!(multispace, |_| ()) | comment | block_comment)
     // alt!(map!(multispace, |_| ()))
 );
 
 named!(
-    valid_comment<String>,
+    take_valid_comment<String>,
     alt!(take_comment|take_block_comment)
 );
 
@@ -278,7 +279,7 @@ named!(
             >> key_vals: many0!(key_val)
             >> tag!(";")
             >> many0!(space)
-            >> comment: opt!(comment2)
+            >> comment: opt!(take_comment)
             >> (Field {
                 name: name,
                 frequency: frequency.unwrap_or(Frequency::Optional),
@@ -367,7 +368,6 @@ enum MessageEvent {
 	ReservedNames(Vec<String>),
 	OneOf(OneOf),
 	Ignore,
-	Comment(String), // 事实上，这个不应该出现在这里
 }
 
 // nested message.
@@ -396,19 +396,18 @@ named!(
             >> events: many0!(message_event)
             >> many0!(br)
             >> tag!("}")
-            >> many0!(br)
+            >> many0!(multispace)
             >> many0!(tag!(";"))
             >> ((name, Some(comment), events))
     )
 );
 
-// parse 带有注释的message. 注释可能没有，所以是 option
+// parse 带有注释的message. 注释可能没有，所以是 option. 然后匹配应该就近原则，尽量紧凑
 named!(
     message_begin<String>,
     do_parse!(
-        many0!(multispace)
-        >> comment: opt!(valid_comment)
-        >> many0!(multispace)
+        comment: opt!(take_comment)
+        >> many0!(space)
         >>tag!("message")
         >>(comment.unwrap_or("".to_string()))
     )
@@ -435,7 +434,6 @@ named!(
                 MessageEvent::Enumerator(e) => msg.enums.push(e),
                 MessageEvent::OneOf(o) => msg.oneofs.push(o),
                 MessageEvent::Ignore => (),
-                MessageEvent::Comment(c) => (),
             }
         }
         msg
@@ -469,7 +467,7 @@ named!(
             >> fields: many0!(enum_field)
             >> many0!(br)
             >> tag!("}")
-            >> many0!(br)
+            >> many0!(multispace)
             >> many0!(tag!(";"))
             >> (Enumerator {
                 name: name,
@@ -503,7 +501,8 @@ named!(
             enumerator => { |e| Event::Enum(e) } |
             rpc_service => { |r| Event::RpcService(r) } |
             option_ignore => { |_| Event::Ignore } |
-            br_with_comment => { |_| Event::Ignore })
+            br => { |_| Event::Ignore }
+    )
 );
 
 named!(pub file_descriptor<FileDescriptor>,
@@ -525,31 +524,23 @@ map!(many0!(event), |events: Vec<Event>| {
 
 #[cfg(test)]
 mod test {
+    use std::fs::File;
+    use std::io::Read;
+
     use super::*;
 
     #[test]
 	fn test_message() {
-		let msg = r#"
-
-    //这是message ReferenceData的注释
-		message ReferenceData
+		let msg = r#"message ReferenceData
     {
         repeated ScenarioInfo  scenarioSet = 1;// 注释啊哈哈
         repeated CalculatedObjectInfo calculatedObjectSet = 2;
-        repeated RiskFactorList riskFactorListSet = 3;
-        repeated RiskMaturityInfo riskMaturitySet = 4;
-        repeated IndicatorInfo indicatorSet = 5;
-        repeated RiskStrikeInfo riskStrikeSet = 6;
-        repeated FreeProjectionList freeProjectionListSet = 7;
-        repeated ValidationProperty ValidationSet = 8;
-        repeated CalcProperties calcPropertiesSet = 9;
-        repeated MaturityInfo maturitySet = 10;
     }"#;
 
 		let mess = message(msg.as_bytes());
 		if let ::nom::IResult::Done(_, mess) = mess {
             eprintln!("mess = {:#?}", mess);
-			assert_eq!(10, mess.fields.len());
+			assert_eq!(2, mess.fields.len());
 		}
 	}
 
@@ -580,6 +571,16 @@ mod test {
             println!("mess = {}",mess);
             assert_eq!("aaa2".to_string(), mess);
         }
+    }
+
+    #[test]
+    fn test_from_file(){
+        let mut s = File::open("./src/Duel.proto").unwrap();
+        let buf :&mut Vec<u8> = &mut vec![];
+        s.read_to_end(buf).unwrap();
+        let desc = file_descriptor(buf).to_full_result().unwrap();
+        // assert_eq!("foo.bar".to_string(), desc.package);
+        eprintln!("desc = {:#?}", desc);
     }
 
 	#[test]
