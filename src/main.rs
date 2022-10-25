@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate nom;
+
 use clap::{Parser, ValueEnum};
 use clap::{Arg, ArgAction, command};
 
@@ -8,6 +11,7 @@ use crate::cliparse::IDefault;
 
 mod cliparse;
 mod proto_2_lua;
+mod proto2lua;
 
 fn main() {
     // let matches = command!() // requires `cargo` feature

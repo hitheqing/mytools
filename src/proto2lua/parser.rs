@@ -1,18 +1,18 @@
 use std::path::{Path, PathBuf};
 use std::str;
 
-use nom::{digit, hex_digit, multispace};
+use nom::{digit, hex_digit, multispace, space};
 
-use crate::types::{
+use super::types::{
     Enumerator, Field, FieldType, FileDescriptor, Frequency, Message, OneOf,
     RpcFunctionDeclaration, RpcService, Syntax,
 };
 
 fn is_word(b: u8) -> bool {
-    match b {
-        b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'.' => true,
-        _ => false,
-    }
+	match b {
+		b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'.' => true,
+		_ => false,
+	}
 }
 
 named!(
@@ -52,10 +52,40 @@ named!(
     do_parse!(tag!("/*") >> take_until_and_consume!("*/") >> ())
 );
 
+named!(
+    take_comment<String>,
+    do_parse!(many0!(br) >> tag!("//") >>content: take_until_and_consume!("\n") >> (String::from_utf8(content.to_vec()).unwrap()))
+);
+named!(
+    take_block_comment<String>,
+    do_parse!(tag!("/*") >> content:take_until_and_consume!("*/") >> (String::from_utf8(content.to_vec()).unwrap()))
+);
+
 // word break: multispace or comment
 named!(
     br<()>,
+    // alt!(map!(multispace, |_| ()) | comment | block_comment)
+    alt!(map!(multispace, |_| ()))
+);
+
+// word break: multispace or comment
+named!(
+    br_with_comment<()>,
     alt!(map!(multispace, |_| ()) | comment | block_comment)
+    // alt!(map!(multispace, |_| ()))
+);
+
+named!(
+    valid_comment<String>,
+    alt!(take_comment|take_block_comment)
+);
+
+// we need comment
+named!(comment2<String>,
+    do_parse!(tag!("//")
+        >> content: take_until!("\n")
+        >> (String::from_utf8(content.to_vec()).unwrap_or("".to_string()))
+    )
 );
 
 named!(
@@ -247,6 +277,8 @@ named!(
             >> many0!(br)
             >> key_vals: many0!(key_val)
             >> tag!(";")
+            >> many0!(space)
+            >> comment: opt!(comment2)
             >> (Field {
                 name: name,
                 frequency: frequency.unwrap_or(Frequency::Optional),
@@ -266,6 +298,7 @@ named!(
                     .find(|&&(k, _)| k == "deprecated")
                     .map_or(false, |&(_, v)| str::FromStr::from_str(v)
                         .expect("Cannot parse Deprecated value")),
+                comment:comment,
             })
     )
 );
@@ -327,15 +360,17 @@ named!(
 );
 
 enum MessageEvent {
-    Message(Message),
-    Enumerator(Enumerator),
-    Field(Field),
-    ReservedNums(Vec<i32>),
-    ReservedNames(Vec<String>),
-    OneOf(OneOf),
-    Ignore,
+	Message(Message),
+	Enumerator(Enumerator),
+	Field(Field),
+	ReservedNums(Vec<i32>),
+	ReservedNames(Vec<String>),
+	OneOf(OneOf),
+	Ignore,
+	Comment(String), // 事实上，这个不应该出现在这里
 }
 
+// nested message.
 named!(
     message_event<MessageEvent>,
     alt!(reserved_nums => { |r| MessageEvent::ReservedNums(r) } |
@@ -344,14 +379,15 @@ named!(
                                          message => { |m| MessageEvent::Message(m) } |
                                          enumerator => { |e| MessageEvent::Enumerator(e) } |
                                          one_of => { |o| MessageEvent::OneOf(o) } |
+                                         // valid_comment => { |c| MessageEvent::Comment(c) } |
                                          extensions => { |_| MessageEvent::Ignore } |
                                          br => { |_| MessageEvent::Ignore })
 );
 
 named!(
-    message_events<(String, Vec<MessageEvent>)>,
+    message_events<(String,Option<String>, Vec<MessageEvent>)>,
     do_parse!(
-        tag!("message")
+        comment: message_begin
             >> many1!(br)
             >> name: word
             >> many0!(br)
@@ -362,18 +398,32 @@ named!(
             >> tag!("}")
             >> many0!(br)
             >> many0!(tag!(";"))
-            >> ((name, events))
+            >> ((name, Some(comment), events))
+    )
+);
+
+// parse 带有注释的message. 注释可能没有，所以是 option
+named!(
+    message_begin<String>,
+    do_parse!(
+        many0!(multispace)
+        >> comment: opt!(valid_comment)
+        >> many0!(multispace)
+        >>tag!("message")
+        >>(comment.unwrap_or("".to_string()))
     )
 );
 
 named!(
     message<Message>,
-    map!(message_events, |(name, events): (
+    map!(message_events, |(name,msg_comment, events): (
         String,
+        Option<String>,
         Vec<MessageEvent>
     )| {
         let mut msg = Message {
             name,
+            msg_comment,
             ..Message::default()
         };
         for e in events {
@@ -385,6 +435,7 @@ named!(
                 MessageEvent::Enumerator(e) => msg.enums.push(e),
                 MessageEvent::OneOf(o) => msg.oneofs.push(o),
                 MessageEvent::Ignore => (),
+                MessageEvent::Comment(c) => (),
             }
         }
         msg
@@ -434,13 +485,13 @@ named!(
 );
 
 enum Event {
-    Syntax(Syntax),
-    Import(PathBuf),
-    Package(String),
-    Message(Message),
-    Enum(Enumerator),
-    RpcService(RpcService),
-    Ignore,
+	Syntax(Syntax),
+	Import(PathBuf),
+	Package(String),
+	Message(Message),
+	Enum(Enumerator),
+	RpcService(RpcService),
+	Ignore,
 }
 
 named!(
@@ -452,7 +503,7 @@ named!(
             enumerator => { |e| Event::Enum(e) } |
             rpc_service => { |r| Event::RpcService(r) } |
             option_ignore => { |_| Event::Ignore } |
-            br => { |_| Event::Ignore })
+            br_with_comment => { |_| Event::Ignore })
 );
 
 named!(pub file_descriptor<FileDescriptor>,
@@ -477,10 +528,13 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_message() {
-        let msg = r#"message ReferenceData
+	fn test_message() {
+		let msg = r#"
+
+    //这是message ReferenceData的注释
+		message ReferenceData
     {
-        repeated ScenarioInfo  scenarioSet = 1;
+        repeated ScenarioInfo  scenarioSet = 1;// 注释啊哈哈
         repeated CalculatedObjectInfo calculatedObjectSet = 2;
         repeated RiskFactorList riskFactorListSet = 3;
         repeated RiskMaturityInfo riskMaturitySet = 4;
@@ -492,40 +546,55 @@ mod test {
         repeated MaturityInfo maturitySet = 10;
     }"#;
 
-        let mess = message(msg.as_bytes());
-        if let ::nom::IResult::Done(_, mess) = mess {
-            assert_eq!(10, mess.fields.len());
-        }
-    }
+		let mess = message(msg.as_bytes());
+		if let ::nom::IResult::Done(_, mess) = mess {
+            eprintln!("mess = {:#?}", mess);
+			assert_eq!(10, mess.fields.len());
+		}
+	}
 
-    #[test]
-    fn test_enum() {
-        let msg = r#"enum PairingStatus {
+	#[test]
+	fn test_enum() {
+		let msg = r#"enum PairingStatus {
                 DEALPAIRED        = 0;
                 INVENTORYORPHAN   = 1;
                 CALCULATEDORPHAN  = 2;
                 CANCELED          = 3;
     }"#;
 
-        let mess = enumerator(msg.as_bytes());
+		let mess = enumerator(msg.as_bytes());
+		if let ::nom::IResult::Done(_, mess) = mess {
+			assert_eq!(4, mess.fields.len());
+		}
+	}
+
+    #[test]
+    fn test_take_comment(){
+        let msg = r#"
+
+        //aaa
+        dfsdf
+        "#;
+        let mess = take_comment(msg.as_bytes());
         if let ::nom::IResult::Done(_, mess) = mess {
-            assert_eq!(4, mess.fields.len());
+            println!("mess = {}",mess);
+            assert_eq!("aaa2".to_string(), mess);
         }
     }
 
-    #[test]
-    fn test_ignore() {
-        let msg = r#"option optimize_for = SPEED;"#;
+	#[test]
+	fn test_ignore() {
+		let msg = r#"option optimize_for = SPEED;"#;
 
-        match option_ignore(msg.as_bytes()) {
-            ::nom::IResult::Done(_, _) => (),
-            e => panic!("Expecting done {:?}", e),
-        }
-    }
+		match option_ignore(msg.as_bytes()) {
+			::nom::IResult::Done(_, _) => (),
+			e => panic!("Expecting done {:?}", e),
+		}
+	}
 
-    #[test]
-    fn test_import() {
-        let msg = r#"syntax = "proto3";
+	#[test]
+	fn test_import() {
+		let msg = r#"syntax = "proto3";
 
     import "test_import_nested_imported_pb.proto";
 
@@ -534,30 +603,34 @@ mod test {
         optional ContainerForNested.NestedEnum e = 2;
     }
     "#;
-        let desc = file_descriptor(msg.as_bytes()).to_full_result().unwrap();
-        assert_eq!(
-            vec![Path::new("test_import_nested_imported_pb.proto")],
-            desc.import_paths
-        );
-    }
+		let desc = file_descriptor(msg.as_bytes()).to_full_result().unwrap();
+		assert_eq!(
+			vec![Path::new("test_import_nested_imported_pb.proto")],
+			desc.import_paths
+		);
+	}
 
-    #[test]
-    fn test_package() {
-        let msg = r#"
+	#[test]
+	fn test_package() {
+		let msg = r#"
         package foo.bar;
 
+//没用的注释1
+
+//有用的注释2
     message ContainsImportedNested {
         optional ContainerForNested.NestedMessage m = 1;
         optional ContainerForNested.NestedEnum e = 2;
     }
     "#;
-        let desc = file_descriptor(msg.as_bytes()).to_full_result().unwrap();
-        assert_eq!("foo.bar".to_string(), desc.package);
-    }
+		let desc = file_descriptor(msg.as_bytes()).to_full_result().unwrap();
+		assert_eq!("foo.bar".to_string(), desc.package);
+        eprintln!("desc = {:#?}", desc);
+	}
 
-    #[test]
-    fn test_nested_message() {
-        let msg = r#"message A
+	#[test]
+	fn test_nested_message() {
+		let msg = r#"message A
     {
         message B {
             repeated int32 a = 1;
@@ -566,41 +639,41 @@ mod test {
         optional b = 1;
     }"#;
 
-        let mess = message(msg.as_bytes());
-        if let ::nom::IResult::Done(_, mess) = mess {
-            assert!(mess.messages.len() == 1);
-        }
-    }
+		let mess = message(msg.as_bytes());
+		if let ::nom::IResult::Done(_, mess) = mess {
+			assert!(mess.messages.len() == 1);
+		}
+	}
 
-    #[test]
-    fn test_map() {
-        let msg = r#"message A
+	#[test]
+	fn test_map() {
+		let msg = r#"message A
     {
         optional map<string, int32> b = 1;
     }"#;
 
-        let mess = message(msg.as_bytes());
-        if let ::nom::IResult::Done(_, mess) = mess {
-            assert_eq!(1, mess.fields.len());
-            match mess.fields[0].typ {
-                FieldType::Map(ref key, ref value) => match (&**key, &**value) {
-                    (&FieldType::String_, &FieldType::Int32) => (),
-                    (&FieldType::StringCow, &FieldType::Int32) => (),
-                    _ => panic!(
-                        "Expecting Map<String, Int32> found Map<{:?}, {:?}>",
-                        key, value
-                    ),
-                },
-                ref f => panic!("Expecting map, got {:?}", f),
-            }
-        } else {
-            panic!("Could not parse map message");
-        }
-    }
+		let mess = message(msg.as_bytes());
+		if let ::nom::IResult::Done(_, mess) = mess {
+			assert_eq!(1, mess.fields.len());
+			match mess.fields[0].typ {
+				FieldType::Map(ref key, ref value) => match (&**key, &**value) {
+					(&FieldType::String_, &FieldType::Int32) => (),
+					(&FieldType::StringCow, &FieldType::Int32) => (),
+					_ => panic!(
+						"Expecting Map<String, Int32> found Map<{:?}, {:?}>",
+						key, value
+					),
+				},
+				ref f => panic!("Expecting map, got {:?}", f),
+			}
+		} else {
+			panic!("Could not parse map message");
+		}
+	}
 
-    #[test]
-    fn test_oneof() {
-        let msg = r#"message A
+	#[test]
+	fn test_oneof() {
+		let msg = r#"message A
     {
         optional int32 a1 = 1;
         oneof a_oneof {
@@ -611,38 +684,38 @@ mod test {
         repeated bool a5 = 5;
     }"#;
 
-        let mess = message(msg.as_bytes());
-        if let ::nom::IResult::Done(_, mess) = mess {
-            assert_eq!(1, mess.oneofs.len());
-            assert_eq!(3, mess.oneofs[0].fields.len());
-        }
-    }
+		let mess = message(msg.as_bytes());
+		if let ::nom::IResult::Done(_, mess) = mess {
+			assert_eq!(1, mess.oneofs.len());
+			assert_eq!(3, mess.oneofs[0].fields.len());
+		}
+	}
 
-    #[test]
-    fn test_reserved() {
-        let msg = r#"message Sample {
+	#[test]
+	fn test_reserved() {
+		let msg = r#"message Sample {
        reserved 4, 15, 17 to 20, 30;
        reserved "foo", "bar";
        uint64 age =1;
        bytes name =2;
     }"#;
 
-        let mess = message(msg.as_bytes());
-        if let ::nom::IResult::Done(_, mess) = mess {
-            assert_eq!(Some(vec![4, 15, 17, 18, 19, 20, 30]), mess.reserved_nums);
-            assert_eq!(
-                Some(vec!["foo".to_string(), "bar".to_string()]),
-                mess.reserved_names
-            );
-            assert_eq!(2, mess.fields.len());
-        } else {
-            panic!("Could not parse reserved fields message");
-        }
-    }
+		let mess = message(msg.as_bytes());
+		if let ::nom::IResult::Done(_, mess) = mess {
+			assert_eq!(Some(vec![4, 15, 17, 18, 19, 20, 30]), mess.reserved_nums);
+			assert_eq!(
+				Some(vec!["foo".to_string(), "bar".to_string()]),
+				mess.reserved_names
+			);
+			assert_eq!(2, mess.fields.len());
+		} else {
+			panic!("Could not parse reserved fields message");
+		}
+	}
 
-    #[test]
-    fn test_rpc_service() {
-        let msg = r#"
+	#[test]
+	fn test_rpc_service() {
+		let msg = r#"
             service RpcService {
                 rpc function0(InStruct0) returns (OutStruct0);
                 rpc function1(InStruct1) returns (OutStruct1);
@@ -650,39 +723,39 @@ mod test {
             }
         "#;
 
-        match file_descriptor(msg.as_bytes()) {
-            ::nom::IResult::Done(_, descriptor) => {
-                println!("Services found: {:?}", descriptor.rpc_services);
-                let service = &descriptor.rpc_services.get(0).expect("Service not found!");
-                let func0 = service.functions.get(0).expect("Function 0 not returned!");
-                let func1 = service.functions.get(1).expect("Function 1 not returned!");
-                let func2 = service.functions.get(2).expect("Function 2 not returned!");
-                assert_eq!("RpcService", service.service_name);
-                assert_eq!("function0", func0.name);
-                assert_eq!("InStruct0", func0.arg);
-                assert_eq!("OutStruct0", func0.ret);
-                assert_eq!("function1", func1.name);
-                assert_eq!("InStruct1", func1.arg);
-                assert_eq!("OutStruct1", func1.ret);
-                assert_eq!("function2", func2.name);
-                assert_eq!("InStruct2", func2.arg);
-                assert_eq!("OutStruct2", func2.ret);
-            }
-            other => panic!("Could not parse RPC Service: {:?}", other),
-        }
-    }
+		match file_descriptor(msg.as_bytes()) {
+			::nom::IResult::Done(_, descriptor) => {
+				println!("Services found: {:?}", descriptor.rpc_services);
+				let service = &descriptor.rpc_services.get(0).expect("Service not found!");
+				let func0 = service.functions.get(0).expect("Function 0 not returned!");
+				let func1 = service.functions.get(1).expect("Function 1 not returned!");
+				let func2 = service.functions.get(2).expect("Function 2 not returned!");
+				assert_eq!("RpcService", service.service_name);
+				assert_eq!("function0", func0.name);
+				assert_eq!("InStruct0", func0.arg);
+				assert_eq!("OutStruct0", func0.ret);
+				assert_eq!("function1", func1.name);
+				assert_eq!("InStruct1", func1.arg);
+				assert_eq!("OutStruct1", func1.ret);
+				assert_eq!("function2", func2.name);
+				assert_eq!("InStruct2", func2.arg);
+				assert_eq!("OutStruct2", func2.ret);
+			}
+			other => panic!("Could not parse RPC Service: {:?}", other),
+		}
+	}
 
-    #[test]
-    fn test_rpc_function() {
-        let msg = r#"rpc function_name(Arg) returns (Ret);"#;
+	#[test]
+	fn test_rpc_function() {
+		let msg = r#"rpc function_name(Arg) returns (Ret);"#;
 
-        match rpc_function_declaration(msg.as_bytes()) {
-            ::nom::IResult::Done(_, declaration) => {
-                assert_eq!("function_name", declaration.name);
-                assert_eq!("Arg", declaration.arg);
-                assert_eq!("Ret", declaration.ret);
-            }
-            other => panic!("Could not parse RPC Function Declaration: {:?}", other),
-        }
-    }
+		match rpc_function_declaration(msg.as_bytes()) {
+			::nom::IResult::Done(_, declaration) => {
+				assert_eq!("function_name", declaration.name);
+				assert_eq!("Arg", declaration.arg);
+				assert_eq!("Ret", declaration.ret);
+			}
+			other => panic!("Could not parse RPC Function Declaration: {:?}", other),
+		}
+	}
 }
