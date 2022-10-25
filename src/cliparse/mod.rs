@@ -59,7 +59,7 @@ pub struct MyApp {
 
     // options
     /// 是否显示调试信息
-    #[arg(short('s'), long)]
+    #[arg(short, long)]
     pub debug: bool,
 
     /// 是否输出PBRouteConfig
@@ -69,22 +69,15 @@ pub struct MyApp {
     #[arg(long)]
     pub dir: Option<String>,
 
-    /// 输出目录 默认"./"
+    /// 输出目录 默认"./outlua"
     #[arg(short)]
-    pub output: String,
-
-    // pub client_suffix: Option<String>,
-
-}
-
-fn _Client_Handler()->String{
-    "_Client_Handler".to_string()
+    pub output: Option<String>,
 }
 
 impl IDefault<MyApp> for MyApp {
     fn fill_default(&mut self) {
-        if self.output == "" {
-            self.output = ".".to_string();
+        if self.output == None {
+            self.output = Some("./outlua".to_string());
         }
     }
 
@@ -95,12 +88,12 @@ impl IDefault<MyApp> for MyApp {
             debug: false,
             write_route_config: false,
             dir: None,
-            output: "".to_string(),
+            output: None,
             // client_suffix: "".to_string()
         }
     }
 
-    fn from_other(&mut self, other: MyApp) {
+    fn set_from_other(&mut self, other: MyApp) {
         self.output = other.output;
         self.dir = other.dir;
         self.debug = other.debug;
@@ -124,5 +117,5 @@ pub enum Mode {
 pub trait IDefault<T> {
     fn fill_default(&mut self);
     fn get_default() -> T;
-    fn from_other(&mut self, other: T);
+    fn set_from_other(&mut self, other: T);
 }

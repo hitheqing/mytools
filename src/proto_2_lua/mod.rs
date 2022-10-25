@@ -58,7 +58,7 @@ pub fn main(snake_case: MyApp) {
                 }
             }
         }
-        let mod_dir = Path::new(config.output.as_str());
+        let mod_dir = Path::new(config.output.as_ref().unwrap().as_str());
         for file_struct in &result {
             if let Ok(_) = write_lua_file(mod_dir, client_suffix, ds_suffix, file_struct) {}
         }
@@ -69,7 +69,7 @@ pub fn main(snake_case: MyApp) {
     } else {
         if let Some(dir) = &config.dir {
             if let Ok(vec) = parse_dir(Path::new(dir.as_str())) {
-                let mod_dir = Path::new(config.output.as_str());
+                let mod_dir = Path::new(config.output.as_ref().unwrap().as_str());
                 for file_struct in &vec {
                     if let Ok(_) = write_lua_file(mod_dir, client_suffix, ds_suffix, file_struct) {}
                 }
@@ -442,14 +442,15 @@ fn create_or_update_file(path: &PathBuf, file_struct: &FileStruct, is_ds: bool) 
 /// 插入函数代码
 fn insert_function_code(remain_messages: Vec<&Message>, file: &mut File, table_name: &str, file_struct: &FileStruct, is_ds: bool) -> std::io::Result<()> {
     for message in remain_messages {
-        if get_config().debug {
-            println!("--func:{}", message.msg_name_full);
-        }
+
 
         if MessageType::Struct == message.msg_type {
             // class define
             write!(file, "{}", message.gen_class_doc_comment(""))?;
             write!(file, "{}", message.gen_table_string("--", None, true))?;
+            if get_config().debug {
+                println!("--class:{}", message.msg_name_full);
+            }
         } else if MessageType::Req == message.msg_type {
             // function doc
             write!(file, "{}", message.gen_func_doc_comment(""))?;
@@ -473,6 +474,10 @@ fn insert_function_code(remain_messages: Vec<&Message>, file: &mut File, table_n
                     );
                     write!(file, "{}", s)?;
                 }
+
+                if get_config().debug {
+                    println!("--func:on_{}", message.msg_name_full);
+                }
             } else {
                 if message.fields.len() > 0 {
                     let s = format!(
@@ -487,6 +492,9 @@ fn insert_function_code(remain_messages: Vec<&Message>, file: &mut File, table_n
                     let s = format!("\tprint(bWriteLog and string.format(\"{}.{} \"))\n", table_name, message.msg_name_full);
                     write!(file, "{}", s)?;
                 }
+                if get_config().debug {
+                    println!("--func:send_{}", message.msg_name_full);
+                }
             }
             // rsp ds only
             if is_ds {
@@ -500,7 +508,7 @@ fn insert_function_code(remain_messages: Vec<&Message>, file: &mut File, table_n
                                 }
 
                                 let s = format!(
-                                    "\t{}.send_{}({})\n",
+                                    "\t{}.{}({})\n",
                                     table_name,
                                     target_message.msg_name_full,
                                     target_message.get_params_str_in_func(true, false)
@@ -537,7 +545,7 @@ fn insert_function_code(remain_messages: Vec<&Message>, file: &mut File, table_n
             if is_ds {
                 if message.fields.len() > 0 {
                     let s = format!(
-                        "\tprint(bWriteLog and string.format(\"{}.send_{} {}\"{}))\n",
+                        "\tprint(bWriteLog and string.format(\"{}.{} {}\"{}))\n",
                         table_name,
                         message.msg_name_full,
                         message.get_print_params_format_str(is_ds),
@@ -547,6 +555,9 @@ fn insert_function_code(remain_messages: Vec<&Message>, file: &mut File, table_n
                 } else {
                     let s = format!("\tprint(bWriteLog and string.format(\"{}.{} \"))\n", table_name, message.msg_name_full);
                     write!(file, "{}", s)?;
+                }
+                if get_config().debug {
+                    println!("--func:{}", message.msg_name_full);
                 }
             } else {
                 if message.fields.len() > 0 {
@@ -561,6 +572,9 @@ fn insert_function_code(remain_messages: Vec<&Message>, file: &mut File, table_n
                 } else {
                     let s = format!("\tprint(bWriteLog and string.format(\"{}.{} \"))\n", table_name, message.msg_name_full);
                     write!(file, "{}", s)?;
+                }
+                if get_config().debug {
+                    println!("--func:on_{}", message.msg_name_full);
                 }
             }
 

@@ -189,7 +189,7 @@ impl Message {
             }
             MessageType::Rsp => {
                 if is_ds {
-                    let ts = format!("function {}.send_{}({})\n", table_name, self.msg_name_full, params);
+                    let ts = format!("function {}.{}({})\n", table_name, self.msg_name_full, params);
                     s.push_str(ts.as_str());
                 } else {
                     let ts = format!("function {}.on_{}(message)\n", table_name, self.msg_name_full);
@@ -198,7 +198,7 @@ impl Message {
             }
             MessageType::Notify => {
                 if is_ds {
-                    let ts = format!("function {}.send_{}({})\n", table_name, self.msg_name_full, params);
+                    let ts = format!("function {}.{}({})\n", table_name, self.msg_name_full, params);
                     s.push_str(ts.as_str());
                 } else {
                     let ts = format!("function {}.on_{}(message)\n", table_name, self.msg_name_full);
@@ -211,6 +211,13 @@ impl Message {
 
     pub fn make_func_regex(&self, is_ds: bool, table_name: &str) -> Regex {
         let params = self.get_params_str_in_func(is_ds, false);
+        let regex_rsp_or_notify = if is_ds {
+            let re = format!("^[ \t]*function[ \t]*{}\\.{}\\({}\\)", table_name, self.msg_name_full, params);
+            Regex::new(re.as_str()).unwrap()
+        } else {
+            let re = format!("^[ \t]*function[ \t]*{}\\.on_{}\\(message\\)", table_name, self.msg_name_full);
+            Regex::new(re.as_str()).unwrap()
+        };
         match self.msg_type {
             MessageType::Struct => {
                 let re = format!("^[ \t]*---@class[ \t]*{}", self.msg_name_full);
@@ -226,22 +233,10 @@ impl Message {
                 }
             }
             MessageType::Rsp => {
-                if is_ds {
-                    let re = format!("^[ \t]*function[ \t]*{}\\.send_{}\\({}\\)", table_name, self.msg_name_full, params);
-                    Regex::new(re.as_str()).unwrap()
-                } else {
-                    let re = format!("^[ \t]*function[ \t]*{}\\.on_{}\\(message\\)", table_name, self.msg_name_full);
-                    Regex::new(re.as_str()).unwrap()
-                }
+                regex_rsp_or_notify
             }
             MessageType::Notify => {
-                if is_ds {
-                    let re = format!("^[ \t]*function[ \t]*{}\\.send_{}\\({}\\)", table_name, self.msg_name_full, params);
-                    Regex::new(re.as_str()).unwrap()
-                } else {
-                    let re = format!("^[ \t]*function[ \t]*{}\\.on_{}\\(message\\)", table_name, self.msg_name_full);
-                    Regex::new(re.as_str()).unwrap()
-                }
+                regex_rsp_or_notify
             }
         }
     }
