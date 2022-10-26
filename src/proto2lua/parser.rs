@@ -3,7 +3,7 @@ use std::str;
 
 use nom::{digit, hex_digit, multispace, space};
 
-use super::types::{Enumerator, Field, FieldType, FileDescriptor, Frequency, Message, OneOf, RpcFunctionDeclaration, RpcService, Syntax};
+use super::types::{Enumerator, Field, FieldType, FileDescriptor, Frequency, Message, OneOf, Syntax};
 
 fn is_word(b: u8) -> bool {
     match b {
@@ -172,7 +172,6 @@ named!(
             >> many0!(br)
             >> number: alt!(hex_integer | integer)
             >> many0!(br)
-            // >> key_vals: many0!(key_val)
             >> tag!(";")
             >> many0!(space)
             >> comment: opt!(take_comment)
@@ -180,32 +179,14 @@ named!(
                 name: name,
                 frequency: frequency.unwrap_or(Frequency::Optional),
                 number: number,
-                // default: key_vals
-                //     .iter()
-                //     .find(|&&(k, _)| k == "default")
-                //     .map(|&(_, v)| v.to_string()),
-                // packed: key_vals
-                //     .iter()
-                //     .find(|&&(k, _)| k == "packed")
-                //     .map(|&(_, v)| str::FromStr::from_str(v).expect("Cannot parse Packed value")),
-                // boxed: false,
                 typ: typ,
-                // deprecated: key_vals
-                //     .iter()
-                //     .find(|&&(k, _)| k == "deprecated")
-                //     .map_or(false, |&(_, v)| str::FromStr::from_str(v)
-                //         .expect("Cannot parse Deprecated value")),
                 comment: comment,
             })
     )
 );
 
 enum MessageEvent {
-    // Message(Message),
-    // Enumerator(Enumerator),
     Field(Field),
-    // ReservedNums(Vec<i32>),
-    // ReservedNames(Vec<String>),
     OneOf(OneOf),
     Ignore,
 }
@@ -214,13 +195,8 @@ enum MessageEvent {
 named!(
     message_event<MessageEvent>,
     alt!(
-        // reserved_nums => { |r| MessageEvent::ReservedNums(r) } |
-        // reserved_names => { |r| MessageEvent::ReservedNames(r) } |
         message_field => { |f| MessageEvent::Field(f) } |
-        // message => { |m| MessageEvent::Message(m) } |
-        // enumerator => { |e| MessageEvent::Enumerator(e) } |
         one_of => { |o| MessageEvent::OneOf(o) } |
-        // valid_comment => { |c| MessageEvent::Comment(c) } |
         extensions => { |_| MessageEvent::Ignore } |
         br => { |_| MessageEvent::Ignore })
 );
@@ -260,10 +236,6 @@ named!(
         for e in events {
             match e {
                 MessageEvent::Field(f) => msg.fields.push(f),
-                // MessageEvent::ReservedNums(r) => msg.reserved_nums = Some(r),
-                // MessageEvent::ReservedNames(r) => msg.reserved_names = Some(r),
-                // MessageEvent::Message(m) => msg.messages.push(m),
-                // MessageEvent::Enumerator(e) => msg.enums.push(e),
                 MessageEvent::OneOf(o) => msg.oneofs.push(o),
                 MessageEvent::Ignore => (),
             }
@@ -309,7 +281,6 @@ enum Event {
     Package(String),
     Message(Message),
     Enum(Enumerator),
-    // RpcService(RpcService),
     Ignore,
 }
 
@@ -320,7 +291,6 @@ named!(
             package => { |p| Event::Package(p) } |
             message => { |m| Event::Message(m) } |
             enumerator => { |e| Event::Enum(e) } |
-            // rpc_service => { |r| Event::RpcService(r) } |
             option_ignore => { |_| Event::Ignore } |
             br => { |_| Event::Ignore }
     )
@@ -336,7 +306,6 @@ map!(many0!(event), |events: Vec<Event>| {
             Event::Package(p) => desc.package = p,
             Event::Message(m) => desc.messages.push(m),
             Event::Enum(e) => desc.enums.push(e),
-            // Event::RpcService(r) => desc.rpc_services.push(r),
             Event::Ignore => (),
         }
     }
@@ -359,7 +328,7 @@ mod test {
     }"#;
 
         let mess = message(msg.as_bytes());
-        if let ::nom::IResult::Done(_, mess) = mess {
+        if let nom::IResult::Done(_, mess) = mess {
             eprintln!("mess = {:#?}", mess);
             assert_eq!(2, mess.fields.len());
         }
@@ -375,7 +344,7 @@ mod test {
     }"#;
 
         let mess = enumerator(msg.as_bytes());
-        if let ::nom::IResult::Done(_, mess) = mess {
+        if let nom::IResult::Done(_, mess) = mess {
             assert_eq!(4, mess.fields.len());
         }
     }
@@ -388,7 +357,7 @@ mod test {
         dfsdf
         "#;
         let mess = take_comment(msg.as_bytes());
-        if let ::nom::IResult::Done(_, mess) = mess {
+        if let nom::IResult::Done(_, mess) = mess {
             println!("mess = {}", mess);
             assert_eq!("aaa2".to_string(), mess);
         }
@@ -409,7 +378,7 @@ mod test {
         let msg = r#"option optimize_for = SPEED;"#;
 
         match option_ignore(msg.as_bytes()) {
-            ::nom::IResult::Done(_, _) => (),
+            nom::IResult::Done(_, _) => (),
             e => panic!("Expecting done {:?}", e),
         }
     }
@@ -455,7 +424,7 @@ mod test {
     }"#;
 
         let mess = message(msg.as_bytes());
-        if let ::nom::IResult::Done(_, mess) = mess {
+        if let nom::IResult::Done(_, mess) = mess {
             assert_eq!(1, mess.fields.len());
             match mess.fields[0].typ {
                 FieldType::Map(ref key, ref value) => match (&**key, &**value) {
@@ -484,209 +453,9 @@ mod test {
     }"#;
 
         let mess = message(msg.as_bytes());
-        if let ::nom::IResult::Done(_, mess) = mess {
+        if let nom::IResult::Done(_, mess) = mess {
             assert_eq!(1, mess.oneofs.len());
             assert_eq!(3, mess.oneofs[0].fields.len());
         }
     }
-
-    // deprecated ---------------------------------------------------------------------
-
-    /*
-
-        named!(
-        key_val<(&str, &str)>,
-        do_parse!(
-            tag!("[")
-                >> many0!(br)
-                >> key: word_ref
-                >> many0!(br)
-                >> tag!("=")
-                >> many0!(br)
-                >> value: map_res!(is_not!("]"), str::from_utf8)
-                >> tag!("]")
-                >> many0!(br)
-                >> ((key, value.trim()))
-        )
-    );
-
-            // named!(
-        //     num_range<Vec<i32>>,
-        //     do_parse!(from_: integer >> many1!(br) >> tag!("to") >> many1!(br) >> to_: integer >> ((from_..(to_ + 1)).collect()))
-        // );
-
-        // named!(
-        //     reserved_nums<Vec<i32>>,
-        //     do_parse!(
-        //         tag!("reserved")
-        //             >> many1!(br)
-        //             >> nums: separated_list!(
-        //                 do_parse!(many0!(br) >> tag!(",") >> many0!(br) >> (())),
-        //                 alt!(num_range | integer => { |i| vec![i] })
-        //             )
-        //             >> many0!(br)
-        //             >> tag!(";")
-        //             >> (nums.into_iter().flat_map(|v| v.into_iter()).collect())
-        //     )
-        // );
-
-        // named!(
-        //     reserved_names<Vec<String>>,
-        //     do_parse!(
-        //         tag!("reserved")
-        //             >> many1!(br)
-        //             >> names:
-        //                 many1!(do_parse!(
-        //                     tag!("\"") >> name: word >> tag!("\"") >> many0!(alt!(br | tag!(",") => { |_| () })) >> (name)
-        //                 ))
-        //             >> many0!(br)
-        //             >> tag!(";")
-        //             >> (names)
-        //     )
-        // );
-
-            // named!(
-            //     rpc_function_declaration<RpcFunctionDeclaration>,
-            //     do_parse!(
-            //         tag!("rpc")
-            //             >> many1!(br)
-            //             >> name: word
-            //             >> many0!(br)
-            //             >> tag!("(")
-            //             >> many0!(br)
-            //             >> arg: word
-            //             >> many0!(br)
-            //             >> tag!(")")
-            //             >> many1!(br)
-            //             >> tag!("returns")
-            //             >> many1!(br)
-            //             >> tag!("(")
-            //             >> many0!(br)
-            //             >> ret: word
-            //             >> many0!(br)
-            //             >> tag!(")")
-            //             >> many0!(br)
-            //             >> alt!(
-            //                 do_parse!(
-            //                     tuple!(
-            //                         tag!("{"),
-            //                         many0!(br),
-            //                         many0!(alt!(option_ignore | map!(tag!(";"), |_| ()))),
-            //                         many0!(br),
-            //                         tag!("}")
-            //                     ) >> ()
-            //                 ) | map!(tag!(";"), |_| ())
-            //             )
-            //             >> many0!(br)
-            //             >> (RpcFunctionDeclaration { name, arg, ret })
-            //     )
-            // );
-
-            // named!(
-            //     rpc_service<RpcService>,
-            //     do_parse!(
-            //         tag!("service")
-            //             >> many1!(br)
-            //             >> service_name: dbg!(word)
-            //             >> many0!(br)
-            //             >> tag!("{")
-            //             >> many0!(br)
-            //             >> functions: many0!(rpc_function_declaration)
-            //             >> many0!(br)
-            //             >> tag!("}")
-            //             >> (RpcService { service_name, functions })
-            //     )
-            // );
-
-                */
-
-    /*
-    #[test]
-    fn test_rpc_function() {
-        let msg = r#"rpc function_name(Arg) returns (Ret);"#;
-
-        match rpc_function_declaration(msg.as_bytes()) {
-            ::nom::IResult::Done(_, declaration) => {
-                assert_eq!("function_name", declaration.name);
-                assert_eq!("Arg", declaration.arg);
-                assert_eq!("Ret", declaration.ret);
-            }
-            other => panic!("Could not parse RPC Function Declaration: {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_nested_message() {
-        let msg = r#"message A
-    {
-        message B {
-            repeated int32 a = 1;
-            optional string b = 2;
-        }
-        optional b = 1;
-    }"#;
-
-        let mess = message(msg.as_bytes());
-        if let ::nom::IResult::Done(_, mess) = mess {
-            assert!(mess.messages.len() == 1);
-        }
-    }
-
-
-    #[test]
-    fn test_reserved() {
-        let msg = r#"message Sample {
-       reserved 4, 15, 17 to 20, 30;
-       reserved "foo", "bar";
-       uint64 age =1;
-       bytes name =2;
-    }"#;
-
-        let mess = message(msg.as_bytes());
-        if let ::nom::IResult::Done(_, mess) = mess {
-            assert_eq!(Some(vec![4, 15, 17, 18, 19, 20, 30]), mess.reserved_nums);
-            assert_eq!(
-                Some(vec!["foo".to_string(), "bar".to_string()]),
-                mess.reserved_names
-            );
-            assert_eq!(2, mess.fields.len());
-        } else {
-            panic!("Could not parse reserved fields message");
-        }
-    }
-
-    #[test]
-    fn test_rpc_service() {
-        let msg = r#"
-            service RpcService {
-                rpc function0(InStruct0) returns (OutStruct0);
-                rpc function1(InStruct1) returns (OutStruct1);
-                rpc function2  (  InStruct2  ) returns (  OutStruct2  ) {  }
-            }
-        "#;
-
-        match file_descriptor(msg.as_bytes()) {
-            ::nom::IResult::Done(_, descriptor) => {
-                println!("Services found: {:?}", descriptor.rpc_services);
-                let service = &descriptor.rpc_services.get(0).expect("Service not found!");
-                let func0 = service.functions.get(0).expect("Function 0 not returned!");
-                let func1 = service.functions.get(1).expect("Function 1 not returned!");
-                let func2 = service.functions.get(2).expect("Function 2 not returned!");
-                assert_eq!("RpcService", service.service_name);
-                assert_eq!("function0", func0.name);
-                assert_eq!("InStruct0", func0.arg);
-                assert_eq!("OutStruct0", func0.ret);
-                assert_eq!("function1", func1.name);
-                assert_eq!("InStruct1", func1.arg);
-                assert_eq!("OutStruct1", func1.ret);
-                assert_eq!("function2", func2.name);
-                assert_eq!("InStruct2", func2.arg);
-                assert_eq!("OutStruct2", func2.ret);
-            }
-            other => panic!("Could not parse RPC Service: {:?}", other),
-        }
-    }
-
-
-    */
 }

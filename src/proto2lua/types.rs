@@ -39,7 +39,7 @@ pub struct MessageIndex {
 }
 
 impl fmt::Debug for MessageIndex {
-    fn fmt(&self, f: &mut fmt::Formatter) -> ::std::result::Result<(), fmt::Error> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         f.debug_set().entries(self.indexes.iter()).finish()
     }
 }
@@ -82,10 +82,6 @@ pub struct Field {
     pub frequency: Frequency,
     pub typ: FieldType,
     pub number: i32,
-    // pub default: Option<String>,
-    // pub packed: Option<bool>,
-    // pub boxed: bool,
-    // pub deprecated: bool,
     pub comment: Option<String>,
 }
 
@@ -94,44 +90,13 @@ pub struct Message {
     pub name: String,
     pub fields: Vec<Field>,
     pub oneofs: Vec<OneOf>,
-    // pub reserved_nums: Option<Vec<i32>>,
-    // pub reserved_names: Option<Vec<String>>,
-    // pub imported: bool,
-    // pub package: String,        // package from imports + nested items
-    // pub messages: Vec<Message>, // nested messages 不建议这种写法
-    // pub enums: Vec<Enumerator>, // nested enums 不建议这种写法
-    // pub module: String,         // 'package' corresponding to actual generated Rust module
-    // pub path: PathBuf,
-    // pub import: PathBuf,
-    // pub index: MessageIndex,
     pub msg_comment: Option<String>,
 }
-
-// #[derive(Debug, Clone, Default)]
-// pub struct RpcFunctionDeclaration {
-//     pub name: String,
-//     pub arg: String,
-//     pub ret: String,
-// }
-
-// #[derive(Debug, Clone, Default)]
-// pub struct RpcService {
-//     pub service_name: String,
-//     pub functions: Vec<RpcFunctionDeclaration>,
-// }
 
 #[derive(Debug, Clone, Default)]
 pub struct Enumerator {
     pub name: String,
     pub fields: Vec<(String, i32)>,
-    // pub fully_qualified_fields: Vec<(String, i32)>,
-    // pub partially_qualified_fields: Vec<(String, i32)>,
-    // pub imported: bool,
-    // pub package: String,
-    // pub module: String,
-    // pub path: PathBuf,
-    // pub import: PathBuf,
-    // pub index: EnumIndex,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -150,7 +115,4 @@ pub struct FileDescriptor {
     pub syntax: Syntax,
     pub messages: Vec<Message>,
     pub enums: Vec<Enumerator>,
-    // pub module: String,
-    // pub rpc_services: Vec<RpcService>,
-    // pub owned: bool,
 }
