@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 use std::str;
 
 use nom::{digit, hex_digit, multispace, space};
+use nom::IResult::Error;
+use walkdir::WalkDir;
 
 use super::types::{Enumerator, Field, FieldType, FileDescriptor, Frequency, Message, OneOf, Syntax};
 
@@ -299,6 +301,8 @@ named!(
 named!(pub file_descriptor<FileDescriptor>,
 map!(many0!(event), |events: Vec<Event>| {
     let mut desc = FileDescriptor::default();
+    let mut ct = 0;
+    let len = events.len();
     for event in events {
         match event {
             Event::Syntax(s) => desc.syntax = s,
@@ -306,9 +310,10 @@ map!(many0!(event), |events: Vec<Event>| {
             Event::Package(p) => desc.package = p,
             Event::Message(m) => desc.messages.push(m),
             Event::Enum(e) => desc.enums.push(e),
-            Event::Ignore => (),
-        }
+            Event::Ignore => (ct += 1),
+        };
     }
+    desc.valid_event_count = len - ct;
     desc
 }));
 
@@ -316,8 +321,40 @@ map!(many0!(event), |events: Vec<Event>| {
 mod test {
     use std::fs::File;
     use std::io::Read;
+    use nom::{IError, IResult};
 
     use super::*;
+
+    #[test]
+    fn test_external_dir() {
+        let dir = Path::new("../../Lua/proto/ds_client/SocialIsland");
+        let proto_iter = WalkDir::new(dir)
+            .into_iter()
+            .filter_map(|x| x.ok())
+            .filter(|x1| x1.path().extension().unwrap_or_default() == "proto");
+
+        for entry in proto_iter {
+            if let Ok(mut f) = File::open(entry.path()) {
+                let buf: &mut Vec<u8> = &mut vec![];
+                f.read_to_end(buf).unwrap();
+                match file_descriptor(buf) {
+                    IResult::Done(_, desc) => {
+                        assert!(
+                            desc.valid_event_count >= 3,
+                            "may be syntax error.\npath:{}",
+                            entry.path().to_str().unwrap()
+                        );
+                    }
+                    Error(_) => {
+                        assert!(false);
+                    }
+                    IResult::Incomplete(_) => {
+                        assert!(false);
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_message() {
@@ -328,7 +365,7 @@ mod test {
     }"#;
 
         let mess = message(msg.as_bytes());
-        if let nom::IResult::Done(_, mess) = mess {
+        if let IResult::Done(_, mess) = mess {
             eprintln!("mess = {:#?}", mess);
             assert_eq!(2, mess.fields.len());
         }
@@ -344,7 +381,7 @@ mod test {
     }"#;
 
         let mess = enumerator(msg.as_bytes());
-        if let nom::IResult::Done(_, mess) = mess {
+        if let IResult::Done(_, mess) = mess {
             assert_eq!(4, mess.fields.len());
         }
     }
@@ -357,7 +394,7 @@ mod test {
         dfsdf
         "#;
         let mess = take_comment(msg.as_bytes());
-        if let nom::IResult::Done(_, mess) = mess {
+        if let IResult::Done(_, mess) = mess {
             println!("mess = {}", mess);
             assert_eq!("aaa2".to_string(), mess);
         }
@@ -378,7 +415,7 @@ mod test {
         let msg = r#"option optimize_for = SPEED;"#;
 
         match option_ignore(msg.as_bytes()) {
-            nom::IResult::Done(_, _) => (),
+            IResult::Done(_, _) => (),
             e => panic!("Expecting done {:?}", e),
         }
     }
@@ -424,7 +461,7 @@ mod test {
     }"#;
 
         let mess = message(msg.as_bytes());
-        if let nom::IResult::Done(_, mess) = mess {
+        if let IResult::Done(_, mess) = mess {
             assert_eq!(1, mess.fields.len());
             match mess.fields[0].typ {
                 FieldType::Map(ref key, ref value) => match (&**key, &**value) {
@@ -453,7 +490,7 @@ mod test {
     }"#;
 
         let mess = message(msg.as_bytes());
-        if let nom::IResult::Done(_, mess) = mess {
+        if let IResult::Done(_, mess) = mess {
             assert_eq!(1, mess.oneofs.len());
             assert_eq!(3, mess.oneofs[0].fields.len());
         }

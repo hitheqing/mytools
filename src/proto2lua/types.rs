@@ -1,6 +1,4 @@
-
 use std::fmt;
-
 
 use std::path::{PathBuf};
 
@@ -115,4 +113,10 @@ pub struct FileDescriptor {
     pub syntax: Syntax,
     pub messages: Vec<Message>,
     pub enums: Vec<Enumerator>,
+
+    /// ## 表示parse成功的个数
+    /// ### 一般来说，至少应该为3. syntax package 和至少1个 message 才有意义
+    /// - 如果少于3，则通常是由于 语法错误导致的
+    /// - 外层的parse总是返回了一个默认值，即使parse失败。所以用这个来记录成功parse的部分。
+    pub valid_event_count:usize,
 }
