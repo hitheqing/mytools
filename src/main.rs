@@ -14,6 +14,7 @@ use crate::cliparse::IDefault;
 mod cliparse;
 mod proto_2_lua;
 mod proto2lua;
+mod luaparser;
 
 fn main() {
     let mut my_app: MyApp = MyApp::parse();
